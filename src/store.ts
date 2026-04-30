@@ -104,12 +104,35 @@ export const useStore = create<AppState>((set, get) => {
       if (!parent) return;
       const newPrompt = parent.prompt + candidate.text;
       const newId = `${parentNodeId}/${candidate.id}`;
-      if (get().nodes[newId]) {
-        set({ tipNodeId: newId });
+
+      // Branching: when clicking a candidate from a non-tip position, prune
+      // any descendants of the parent (the "old future") so the chain
+      // visualization shows only the new branch.
+      const allNodes = get().nodes;
+      const descendantsToRemove = new Set<string>();
+      const collect = (id: string) => {
+        for (const n of Object.values(allNodes)) {
+          if (n.parentId === id && n.id !== newId) {
+            descendantsToRemove.add(n.id);
+            collect(n.id);
+          }
+        }
+      };
+      collect(parentNodeId);
+
+      const cleanedNodes: Record<string, TreeNode> = {};
+      for (const [id, node] of Object.entries(allNodes)) {
+        if (!descendantsToRemove.has(id)) cleanedNodes[id] = node;
+      }
+
+      if (cleanedNodes[newId]) {
+        set({ nodes: cleanedNodes, tipNodeId: newId });
         return;
       }
+
       const node = makeNode(newId, parentNodeId, newPrompt);
-      set({ nodes: { ...get().nodes, [newId]: node }, tipNodeId: newId });
+      cleanedNodes[newId] = node;
+      set({ nodes: cleanedNodes, tipNodeId: newId });
       requestDistribution(newId, newPrompt);
     },
 

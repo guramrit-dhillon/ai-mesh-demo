@@ -5,15 +5,23 @@ const DEBOUNCE_MS = 150;
 
 export function PromptInput() {
   const setPrompt = useStore((s) => s.setPrompt);
-  const storedPrompt = useStore((s) => s.prompt);
-  const [localValue, setLocalValue] = useState(storedPrompt);
+  // Read the prompt at the *current tip*, not the typed root prompt — that way
+  // clicking a candidate (which advances the tip) is reflected in the textarea.
+  const tipPrompt = useStore((s) => s.nodes[s.tipNodeId]?.prompt ?? s.prompt);
+  const [localValue, setLocalValue] = useState(tipPrompt);
 
+  // Pull external changes (tip advances via click) into the textarea.
+  useEffect(() => {
+    setLocalValue(tipPrompt);
+  }, [tipPrompt]);
+
+  // Debounce user typing back to the store.
   useEffect(() => {
     const handle = setTimeout(() => {
-      if (localValue !== storedPrompt) setPrompt(localValue);
+      if (localValue !== tipPrompt) setPrompt(localValue);
     }, DEBOUNCE_MS);
     return () => clearTimeout(handle);
-  }, [localValue, storedPrompt, setPrompt]);
+  }, [localValue, tipPrompt, setPrompt]);
 
   return (
     <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-3">

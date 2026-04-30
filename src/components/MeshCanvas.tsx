@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import ForceGraph3D from 'react-force-graph-3d';
 import SpriteText from 'three-spritetext';
 import * as THREE from 'three';
+import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { useStore } from '../store';
 import { score } from '../sampling';
 import { renderToken } from '../tokens';
@@ -38,6 +39,7 @@ interface GraphLink {
   alive: boolean;
   isChain: boolean;
   isTopFan: boolean;
+  isActiveFan: boolean;
   intensity: number;
 }
 
@@ -53,7 +55,8 @@ function decayFor(distance: number): number {
 function buildGraphData(
   tipNodeId: string,
   storeNodes: Record<string, TreeNode>,
-  sampling: ReturnType<typeof useStore.getState>['sampling']
+  sampling: ReturnType<typeof useStore.getState>['sampling'],
+  positionHints: Map<string, { x: number; y: number; z: number }>
 ): GraphData | null {
   const tipNode = storeNodes[tipNodeId];
   if (!tipNode || !tipNode.inputTokens || !tipNode.candidates) return null;
@@ -97,6 +100,7 @@ function buildGraphData(
         alive: true,
         isChain: true,
         isTopFan: false,
+        isActiveFan: false,
         intensity: 0.85 + 0.15 * decay
       });
     }
@@ -130,6 +134,12 @@ function buildGraphData(
       const isTop = o.rank === 0;
       const isChosen = chosenText !== null && o.candidate.text === chosenText;
       const id = `fan-${tn.id}-${o.candidate.id}`;
+      // For new nodes, seed position near the anchor so they ease in instead
+      // of shooting from origin. Existing nodes are preserved by the library.
+      const hint = positionHints.get(id) ?? positionHints.get(anchorChainNodeId);
+      const seedX = hint ? hint.x + (Math.random() - 0.5) * 4 : (fanPositionIndex - 1) * CHAIN_SPACING;
+      const seedY = hint ? hint.y + (Math.random() - 0.5) * 4 : 0;
+      const seedZ = hint ? hint.z + (Math.random() - 0.5) * 4 : 0;
       nodes.push({
         id,
         kind: 'candidate',
@@ -143,7 +153,10 @@ function buildGraphData(
         rank: o.rank,
         treeNodeId: tn.id,
         candidateIndex: o.originalIndex,
-        candidate: o.candidate
+        candidate: o.candidate,
+        x: seedX,
+        y: seedY,
+        z: seedZ
       });
       const intensity = isActive
         ? isTop
@@ -160,6 +173,7 @@ function buildGraphData(
         alive: o.alive,
         isChain: false,
         isTopFan: isTop && isActive,
+        isActiveFan: isActive,
         intensity
       });
     });
@@ -265,6 +279,8 @@ export function MeshCanvas() {
 
   const containerRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<unknown>(null);
+  const positionsRef = useRef<Map<string, { x: number; y: number; z: number }>>(new Map());
+  const graphDataRef = useRef<GraphData>({ nodes: [], links: [] });
   const [size, setSize] = useState({ width: 800, height: 600 });
 
   useEffect(() => {
@@ -278,9 +294,13 @@ export function MeshCanvas() {
   }, []);
 
   const graphData: GraphData = useMemo(
-    () => buildGraphData(tipNodeId, storeNodes, sampling) ?? { nodes: [], links: [] },
+    () => buildGraphData(tipNodeId, storeNodes, sampling, positionsRef.current) ?? { nodes: [], links: [] },
     [tipNodeId, storeNodes, sampling]
   );
+
+  useEffect(() => {
+    graphDataRef.current = graphData;
+  }, [graphData]);
 
   useEffect(() => {
     const fg = fgRef.current as
@@ -288,6 +308,7 @@ export function MeshCanvas() {
           d3Force: (name: string) => unknown;
           scene: () => THREE.Scene;
           zoomToFit: (ms?: number, padding?: number) => void;
+          postProcessingComposer?: () => { addPass: (p: unknown) => void };
         }
       | null;
     if (!fg) return;
@@ -318,6 +339,21 @@ export function MeshCanvas() {
       const stars = new THREE.Points(starGeom, starMat);
       stars.name = STAR_TAG;
       scene.add(stars);
+    }
+    // Bloom for the sci-fi glow on bright text/edges.
+    if (fg.postProcessingComposer) {
+      try {
+        const composer = fg.postProcessingComposer();
+        const bloomPass = new UnrealBloomPass(
+          new THREE.Vector2(window.innerWidth, window.innerHeight),
+          0.95, // strength
+          0.7, // radius
+          0.18 // threshold (lower = more things bloom)
+        );
+        composer.addPass(bloomPass);
+      } catch {
+        /* postprocessing unavailable */
+      }
     }
   }, []);
 
@@ -355,17 +391,28 @@ export function MeshCanvas() {
       chargeForce.distanceMax(120);
     }
 
-    // Re-fit camera shortly after physics restart so the freshly-laid-out
-    // graph fills the view.
-    const t = window.setTimeout(() => {
-      try {
-        fg.zoomToFit(800, 60);
-      } catch {
-        /* fg may have unmounted */
-      }
-    }, 1200);
-    return () => window.clearTimeout(t);
   }, [graphData]);
+
+  // Track tip-id and chain-length signature. Only re-fit camera when the
+  // *structure* of the chain genuinely changes (new tip, prompt extended),
+  // not on every keystroke / sampling slider drag.
+  const chainSignature = `${tipNodeId}:${tipNode?.inputTokens?.length ?? 0}`;
+  useEffect(() => {
+    const fg = fgRef.current as
+      | { zoomToFit: (ms?: number, padding?: number) => void }
+      | null;
+    if (!fg) return;
+    const t1 = window.setTimeout(() => {
+      try { fg.zoomToFit(800, 80); } catch { /* unmounted */ }
+    }, 1500);
+    const t2 = window.setTimeout(() => {
+      try { fg.zoomToFit(600, 80); } catch { /* unmounted */ }
+    }, 3500);
+    return () => {
+      window.clearTimeout(t1);
+      window.clearTimeout(t2);
+    };
+  }, [chainSignature]);
 
   if (!tipNode) return <FallbackOverlay message="Loading..." />;
   if (tipNode.status === 'error') {
@@ -394,6 +441,7 @@ export function MeshCanvas() {
         graphData={graphData}
         backgroundColor="rgba(0,0,0,0)"
         showNavInfo={false}
+        controlType="orbit"
         nodeThreeObject={(node) => makeSprite(node as unknown as GraphNode)}
         nodeThreeObjectExtend={false}
         linkColor={(l) => linkColor(l as unknown as GraphLink)}
@@ -406,24 +454,39 @@ export function MeshCanvas() {
         }}
         linkDirectionalParticles={(l) => {
           const link = l as unknown as GraphLink;
-          if (link.isTopFan) return 4;
+          if (link.isTopFan) return 5;
+          if (link.isActiveFan) return link.alive ? 2 : 0;
           if (link.isChain) return 2;
           return 0;
         }}
         linkDirectionalParticleWidth={(l) => {
           const link = l as unknown as GraphLink;
-          return link.isTopFan ? 2.2 : 1.2;
+          if (link.isTopFan) return 2.4;
+          if (link.isActiveFan) return 1.4;
+          return 1.2;
         }}
         linkDirectionalParticleSpeed={(l) => {
           const link = l as unknown as GraphLink;
-          return link.isTopFan ? 0.012 : 0.006;
+          if (link.isTopFan) return 0.014;
+          if (link.isActiveFan) return 0.008 + 0.006 * link.intensity;
+          return 0.005;
         }}
         linkDirectionalParticleColor={() => '#cfe2ff'}
-        d3AlphaDecay={0.025}
-        d3VelocityDecay={0.4}
-        cooldownTicks={300}
-        warmupTicks={50}
+        d3AlphaDecay={0.04}
+        d3AlphaMin={0.005}
+        d3VelocityDecay={0.45}
+        cooldownTime={Infinity}
+        warmupTicks={0}
         enableNodeDrag={false}
+        onEngineTick={() => {
+          // The library mutates x/y/z on the node objects we passed in.
+          const nodes = graphDataRef.current.nodes;
+          for (const n of nodes) {
+            if (n.x !== undefined && n.y !== undefined && n.z !== undefined) {
+              positionsRef.current.set(n.id, { x: n.x, y: n.y, z: n.z });
+            }
+          }
+        }}
         onNodeHover={(node) => {
           const n = node as unknown as GraphNode | null;
           if (!n || n.kind !== 'candidate' || !n.treeNodeId || n.candidateIndex === undefined) {
@@ -436,7 +499,9 @@ export function MeshCanvas() {
         }}
         onNodeClick={(node) => {
           const n = node as unknown as GraphNode;
-          if (n.kind !== 'candidate' || !n.isActive || !n.treeNodeId || !n.candidate) return;
+          if (n.kind !== 'candidate' || !n.treeNodeId || !n.candidate) return;
+          // Allow clicking historical alternatives — store.expand prunes any
+          // existing future, branching the chain at the clicked position.
           expand(n.treeNodeId, n.candidate);
         }}
       />

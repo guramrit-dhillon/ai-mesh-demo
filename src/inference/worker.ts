@@ -50,7 +50,12 @@ async function computeDistribution(prompt: string): Promise<InferenceResult> {
   const tokenizer = await tokenizerPromise!;
   const model = await modelPromise!;
 
-  const safePrompt = prompt.length === 0 ? '\n' : prompt;
+  // Trim trailing whitespace — GPT-2 BPE treats a trailing space as a separate
+  // token, so "I'm going to " predicts "what starts a new word" (often
+  // single letters) instead of "what completes the phrase". Match the way
+  // user-facing inference UIs handle this by stripping trailing whitespace.
+  const trimmed = prompt.replace(/\s+$/, '');
+  const safePrompt = trimmed.length === 0 ? '\n' : trimmed;
   // reason: tokenizer call return type is a polymorphic union in the library types; casting to any to avoid inference failure
   const encoded = await (tokenizer as unknown as (text: string, opts: object) => Promise<{ input_ids: import('@huggingface/transformers').Tensor }>)(safePrompt, { return_tensors: 'pt' });
 
