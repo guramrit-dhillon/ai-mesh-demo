@@ -1,88 +1,77 @@
-import { useMemo } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import ForceGraph2D from 'react-force-graph-2d';
 import { useStore } from '../store';
 import { score } from '../sampling';
 import { renderToken } from '../tokens';
 import type { CandidateToken, TreeNode } from '../types';
 
-const COLUMN_WIDTH = 180;
-const NODE_VERTICAL_SPACING = 40;
-const MAX_BUBBLE_R = 26;
-const MIN_BUBBLE_R = 6;
-
-interface LaidOutBubble {
-  nodeId: string;
+interface GraphNode {
+  id: string;
+  treeNodeId: string;
   candidateIndex: number;
   candidate: CandidateToken;
   prob: number;
   alive: boolean;
   rank: number;
-  x: number;
-  y: number;
-  r: number;
+  isRoot: boolean;
 }
 
-interface LaidOutEdge {
-  fromX: number;
-  fromY: number;
-  toX: number;
-  toY: number;
+interface GraphLink {
+  source: string;
+  target: string;
   alive: boolean;
 }
 
-function layout(
+const MIN_R = 6;
+const MAX_R = 26;
+const VISIBLE_PER_NODE = 12;
+
+function buildGraph(
   nodes: Record<string, TreeNode>,
   rootId: string,
   sampling: ReturnType<typeof useStore.getState>['sampling']
-): { bubbles: LaidOutBubble[]; edges: LaidOutEdge[]; width: number; height: number } {
-  const bubbles: LaidOutBubble[] = [];
-  const edges: LaidOutEdge[] = [];
-  let maxColumn = 0;
-  let maxRow = 0;
+): { nodes: GraphNode[]; links: GraphLink[] } {
+  const gNodes: GraphNode[] = [];
+  const gLinks: GraphLink[] = [];
 
-  function place(nodeId: string, depth: number, parentBubble: { x: number; y: number } | null): void {
-    const node = nodes[nodeId];
-    if (!node || !node.candidates) return;
-    const x = depth * COLUMN_WIDTH + 80;
-    const scored = score(node.candidates.map((c) => c.logit), sampling);
-    const visibleCount = Math.min(node.candidates.length, 12);
-    const verticalOffset = (visibleCount - 1) * NODE_VERTICAL_SPACING / 2 + MAX_BUBBLE_R + 20;
+  function visit(treeNodeId: string, parentCandidateId: string | null, depth: number): void {
+    const tn = nodes[treeNodeId];
+    if (!tn || !tn.candidates) return;
+
+    const visibleCount = Math.min(tn.candidates.length, VISIBLE_PER_NODE);
+    const scored = score(
+      tn.candidates.map((c) => c.logit),
+      sampling
+    );
+
     for (let i = 0; i < visibleCount; i++) {
-      const candidate: CandidateToken = node.candidates[i];
+      const cand: CandidateToken = tn.candidates[i];
       const s = scored[i];
-      const y = (i - (visibleCount - 1) / 2) * NODE_VERTICAL_SPACING + verticalOffset;
-      const r = MIN_BUBBLE_R + (MAX_BUBBLE_R - MIN_BUBBLE_R) * Math.sqrt(s.prob);
-      bubbles.push({
-        nodeId,
+      const gid = `${treeNodeId}#${i}`;
+      gNodes.push({
+        id: gid,
+        treeNodeId,
         candidateIndex: i,
-        candidate,
+        candidate: cand,
         prob: s.prob,
         alive: s.alive,
         rank: s.rank,
-        x,
-        y,
-        r
+        isRoot: depth === 0 && i === 0
       });
-      if (parentBubble) {
-        edges.push({
-          fromX: parentBubble.x,
-          fromY: parentBubble.y,
-          toX: x,
-          toY: y,
-          alive: s.alive
-        });
-      }
-      maxColumn = Math.max(maxColumn, x + r + 20);
-      maxRow = Math.max(maxRow, y + r + 20);
 
-      const childId = `${nodeId}/${candidate.id}`;
-      if (nodes[childId]) {
-        place(childId, depth + 1, { x, y });
+      if (parentCandidateId) {
+        gLinks.push({ source: parentCandidateId, target: gid, alive: s.alive });
+      }
+
+      const childTreeNodeId = `${treeNodeId}/${cand.id}`;
+      if (nodes[childTreeNodeId]) {
+        visit(childTreeNodeId, gid, depth + 1);
       }
     }
   }
 
-  place(rootId, 0, null);
-  return { bubbles, edges, width: Math.max(maxColumn, 600), height: Math.max(maxRow + 100, 500) };
+  visit(rootId, null, 0);
+  return { nodes: gNodes, links: gLinks };
 }
 
 export function MeshCanvas() {
@@ -94,10 +83,23 @@ export function MeshCanvas() {
 
   const rootNode = nodes[rootId];
 
-  const { bubbles, edges, width, height } = useMemo(
-    () => layout(nodes, rootId, sampling),
+  const graphData = useMemo(
+    () => buildGraph(nodes, rootId, sampling),
     [nodes, rootId, sampling]
   );
+
+  const containerRef = useRef<HTMLDivElement>(null);
+  const [size, setSize] = useState({ width: 800, height: 600 });
+
+  useEffect(() => {
+    const el = containerRef.current;
+    if (!el) return;
+    const measure = () => setSize({ width: el.clientWidth, height: el.clientHeight });
+    measure();
+    const ro = new ResizeObserver(measure);
+    ro.observe(el);
+    return () => ro.disconnect();
+  }, []);
 
   if (!rootNode || rootNode.status === 'loading') {
     return (
@@ -124,50 +126,60 @@ export function MeshCanvas() {
   }
 
   return (
-    <div className="h-full w-full overflow-auto">
-      <svg width={width} height={height} className="block">
-        {edges.map((e, i) => (
-          <line
-            key={i}
-            x1={e.fromX}
-            y1={e.fromY}
-            x2={e.toX}
-            y2={e.toY}
-            stroke="#5b9dff"
-            strokeOpacity={e.alive ? 0.4 : 0.1}
-          />
-        ))}
-        {bubbles.map((b) => (
-          <g
-            key={`${b.nodeId}-${b.candidateIndex}`}
-            onMouseEnter={() => setHover(b.nodeId, b.candidateIndex)}
-            onMouseLeave={() => setHover(null, null)}
-            onClick={() => expand(b.nodeId, b.candidate)}
-            style={{ cursor: 'pointer' }}
-          >
-            <circle
-              cx={b.x}
-              cy={b.y}
-              r={b.r}
-              fill="#5b9dff"
-              fillOpacity={b.alive ? 0.3 + 0.7 * b.prob : 0.08}
-              stroke="#5b9dff"
-              strokeOpacity={b.alive ? 0.9 : 0.2}
-            />
-            <text
-              x={b.x}
-              y={b.y}
-              textAnchor="middle"
-              dominantBaseline="middle"
-              fontFamily="ui-monospace, monospace"
-              fontSize="11"
-              fill={b.alive ? '#fff' : '#64748b'}
-            >
-              {renderToken(b.candidate.text)}
-            </text>
-          </g>
-        ))}
-      </svg>
+    <div ref={containerRef} className="h-full w-full">
+      <ForceGraph2D
+        width={size.width}
+        height={size.height}
+        graphData={graphData}
+        backgroundColor="rgba(0,0,0,0)"
+        cooldownTicks={120}
+        d3VelocityDecay={0.35}
+        linkColor={(l: { alive?: boolean }) =>
+          l.alive ? 'rgba(91,157,255,0.5)' : 'rgba(91,157,255,0.1)'
+        }
+        linkWidth={1}
+        nodeRelSize={1}
+        nodeCanvasObject={(node, ctx, globalScale) => {
+          const n = node as unknown as GraphNode & { x?: number; y?: number };
+          if (n.x === undefined || n.y === undefined) return;
+          const r = MIN_R + (MAX_R - MIN_R) * Math.sqrt(n.prob);
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, r, 0, 2 * Math.PI);
+          ctx.fillStyle = n.alive
+            ? `rgba(91,157,255,${0.3 + 0.7 * n.prob})`
+            : 'rgba(91,157,255,0.08)';
+          ctx.fill();
+          ctx.strokeStyle = n.alive ? 'rgba(91,157,255,0.9)' : 'rgba(91,157,255,0.25)';
+          ctx.lineWidth = 1.5;
+          ctx.stroke();
+          ctx.fillStyle = n.alive ? '#fff' : '#64748b';
+          ctx.font = `${11 / globalScale}px ui-monospace, monospace`;
+          ctx.textAlign = 'center';
+          ctx.textBaseline = 'middle';
+          ctx.fillText(renderToken(n.candidate.text), n.x, n.y);
+        }}
+        nodePointerAreaPaint={(node, color, ctx) => {
+          const n = node as unknown as GraphNode & { x?: number; y?: number };
+          if (n.x === undefined || n.y === undefined) return;
+          const r = MIN_R + (MAX_R - MIN_R) * Math.sqrt(n.prob);
+          ctx.fillStyle = color;
+          ctx.beginPath();
+          ctx.arc(n.x, n.y, r, 0, 2 * Math.PI);
+          ctx.fill();
+        }}
+        onNodeClick={(node) => {
+          const n = node as unknown as GraphNode;
+          expand(n.treeNodeId, n.candidate);
+        }}
+        onNodeHover={(node) => {
+          if (!node) {
+            setHover(null, null);
+            return;
+          }
+          const n = node as unknown as GraphNode;
+          setHover(n.treeNodeId, n.candidateIndex);
+        }}
+      />
     </div>
   );
 }
