@@ -11,16 +11,21 @@ import type { CandidateToken, TreeNode } from '../types';
 const VISIBLE_PER_NODE = 24;
 const CHAIN_SPACING = 18;
 const MAX_VISIBLE_CHAIN = 6;
+const MAX_LOOKAHEAD_DEPTH = 3;
+// How many candidates to show per lookahead level (decreases with depth).
+const LOOKAHEAD_VISIBLE = [10, 6, 4];
 
 interface GraphNode {
   id: string;
-  kind: 'chain' | 'candidate';
+  kind: 'chain' | 'candidate' | 'lookahead';
   text: string;
   alive: boolean;
   isTop: boolean;
   isActive: boolean;
   isChosen: boolean;
   isTip: boolean;
+  // 0 = active fan, 1+ = lookahead depth
+  lookaheadDepth: number;
   decay: number;
   prob: number;
   rank: number;
@@ -42,6 +47,8 @@ interface GraphLink {
   isChain: boolean;
   isTopFan: boolean;
   isActiveFan: boolean;
+  isLookahead: boolean;
+  lookaheadDepth: number;
   intensity: number;
 }
 
@@ -96,6 +103,7 @@ function buildGraphData(
       isActive: false,
       isChosen: false,
       isTip,
+      lookaheadDepth: 0,
       decay,
       prob: 1,
       rank: i,
@@ -158,6 +166,7 @@ function buildGraphData(
         isActive,
         isChosen,
         isTip: false,
+        lookaheadDepth: 0,
         decay: fadeFactor,
         prob: o.prob,
         rank: o.rank,
@@ -178,26 +187,133 @@ function buildGraphData(
           ? 0.85
           : 0.18 * fadeFactor;
       links.push({
-        // Match the new text-based id so links stay attached.
         source: anchorChainNodeId,
         target: id,
         alive: o.alive,
         isChain: false,
         isTopFan: isTop && isActive,
         isActiveFan: isActive,
+        isLookahead: false,
+        lookaheadDepth: 0,
         intensity
       });
     });
   });
 
+  // Lookahead: walk forward from the active tip, following each level's top-1
+  // child if it exists in storeNodes. Render its candidates as a softer fan
+  // anchored to the previous level's top-1 node. Each level dims further.
+  let parentTreeNode: TreeNode = tipNode;
+  let parentTopGraphId: string | null = null;
+  // Find the active fan's top-1 node id (for anchoring lookahead level 1).
+  const activeTopOne = nodes.find((n) => n.isTop && n.isActive);
+  if (activeTopOne) parentTopGraphId = activeTopOne.id;
+
+  for (let depth = 1; depth <= MAX_LOOKAHEAD_DEPTH; depth++) {
+    if (!parentTreeNode.candidates || !parentTopGraphId) break;
+    // Top-1 of parent = candidate with rank 0 under current sampling.
+    const parentScored = score(
+      parentTreeNode.candidates.map((c) => c.logit),
+      sampling
+    );
+    const parentTopIdx = parentScored.findIndex((s) => s.rank === 0);
+    if (parentTopIdx < 0) break;
+    const parentTopCandidate = parentTreeNode.candidates[parentTopIdx];
+    const lookaheadId = `${parentTreeNode.id}/${parentTopCandidate.id}`;
+    const lookaheadNode = storeNodes[lookaheadId];
+    if (!lookaheadNode || !lookaheadNode.candidates) break;
+
+    const visible = Math.min(
+      lookaheadNode.candidates.length,
+      LOOKAHEAD_VISIBLE[depth - 1] ?? 4
+    );
+    const fadeFactor = Math.pow(0.7, depth);
+    const lookScored = score(
+      lookaheadNode.candidates.map((c) => c.logit),
+      sampling
+    );
+    const lookOrdered = lookScored
+      .map((s, i) => ({
+        ...s,
+        candidate: lookaheadNode.candidates![i],
+        originalIndex: i
+      }))
+      .sort((a, b) => a.rank - b.rank)
+      .slice(0, visible);
+
+    let nextTopGraphId: string | null = null;
+    lookOrdered.forEach((o) => {
+      const isLocalTop = o.rank === 0;
+      const id = `lookahead-${lookaheadNode.id}-${o.candidate.text}`;
+      const hint =
+        positionsRef_get(positionHints, id) ?? positionHints.get(parentTopGraphId!);
+      const seedX = hint ? hint.x + (Math.random() - 0.5) * 3 : 0;
+      const seedY = hint ? hint.y + (Math.random() - 0.5) * 3 : 0;
+      const seedZ = hint ? hint.z + (Math.random() - 0.5) * 3 : 0;
+      nodes.push({
+        id,
+        kind: 'lookahead',
+        text: o.candidate.text,
+        alive: o.alive,
+        isTop: isLocalTop,
+        isActive: false,
+        isChosen: false,
+        isTip: false,
+        lookaheadDepth: depth,
+        decay: fadeFactor,
+        prob: o.prob,
+        rank: o.rank,
+        treeNodeId: lookaheadNode.id,
+        candidateIndex: o.originalIndex,
+        candidate: o.candidate,
+        x: seedX,
+        y: seedY,
+        z: seedZ
+      });
+      const intensity = (isLocalTop ? 0.9 : 0.4 + 0.4 * o.prob) * fadeFactor;
+      links.push({
+        source: parentTopGraphId!,
+        target: id,
+        alive: o.alive,
+        isChain: false,
+        isTopFan: false,
+        isActiveFan: false,
+        isLookahead: true,
+        lookaheadDepth: depth,
+        intensity
+      });
+      if (isLocalTop) nextTopGraphId = id;
+    });
+
+    if (!nextTopGraphId) break;
+    parentTopGraphId = nextTopGraphId;
+    parentTreeNode = lookaheadNode;
+  }
+
   return { nodes, links };
+}
+
+// Wrap Map.get with a small helper so the per-call type stays clean.
+function positionsRef_get(
+  positionHints: Map<string, { x: number; y: number; z: number }>,
+  key: string
+): { x: number; y: number; z: number } | undefined {
+  return positionHints.get(key);
 }
 
 function tokenColor(node: GraphNode): string {
   if (node.kind === 'chain') {
-    // Brighter chain tokens — clamp to a higher floor so even old context is legible
     const t = 0.7 + 0.3 * node.decay;
     return `rgb(${Math.round(165 * t)}, ${Math.round(205 * t)}, ${Math.round(255 * t)})`;
+  }
+  if (node.kind === 'lookahead') {
+    if (node.isTop) {
+      // Lookahead top-1: warmer tint to distinguish from active top-1 (white)
+      const t = node.decay;
+      return `rgb(${Math.round(220 * t + 35)}, ${Math.round(200 * t + 30)}, ${Math.round(255 * t + 0)})`;
+    }
+    const t = node.decay * (0.5 + 0.5 * node.prob);
+    return `rgb(${Math.round(160 * t + 40)}, ${Math.round(180 * t + 40)}, ${Math.round(220 * t + 40)})`;
   }
   if (node.isTop && node.isActive) return '#ffffff';
   if (node.isActive) {
@@ -211,6 +327,10 @@ function tokenColor(node: GraphNode): string {
 
 function tokenSize(node: GraphNode): number {
   if (node.kind === 'chain') return 3.5 + 4.5 * node.decay;
+  if (node.kind === 'lookahead') {
+    if (node.isTop) return (5 + 4 * node.prob) * node.decay + 1;
+    return (3 + 2.5 * node.prob) * node.decay + 1;
+  }
   if (node.isTop && node.isActive) return 11;
   if (node.isActive) return 4 + 7 * Math.sqrt(node.prob);
   if (node.isChosen) return 5;
@@ -224,6 +344,10 @@ function linkColor(link: GraphLink): string {
   }
   if (link.isTopFan) {
     return `rgba(180, 220, 255, ${0.5 + 0.5 * i})`;
+  }
+  if (link.isLookahead) {
+    const a = 0.12 + 0.45 * i;
+    return `rgba(170, 200, 255, ${a})`;
   }
   return `rgba(120, 175, 255, ${0.18 * i + 0.05})`;
 }
@@ -421,6 +545,21 @@ export function MeshCanvas() {
     }
 
   }, [graphData]);
+
+  // The tip is pinned at world origin (0, 0, 0). When the chain advances or
+  // the user clicks, gently re-anchor the camera's lookAt to the tip so the
+  // active region stays centered. Camera distance / rotation are preserved.
+  const tipSignature = `${tipNodeId}:${tipNode?.inputTokens?.length ?? 0}`;
+  useEffect(() => {
+    const fg = fgRef.current as
+      | { controls: () => { target?: { set: (x: number, y: number, z: number) => void } } }
+      | null;
+    if (!fg) return;
+    try {
+      const ctl = fg.controls();
+      if (ctl?.target) ctl.target.set(0, 0, 0);
+    } catch { /* unmounted or no controls yet */ }
+  }, [tipSignature]);
 
   // Auto-fit ONCE when the graph first becomes populated. After that, the
   // camera stays put across keystrokes / clicks / slider drags so the view

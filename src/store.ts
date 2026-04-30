@@ -6,6 +6,31 @@ import type {
   TreeNode
 } from './types';
 import { onDistribution, onModelStatus, requestDistribution } from './inference/client';
+import { softmax } from './sampling';
+
+// Auto-lookahead: after a node's distribution arrives, if its top-1 token is
+// confidently predicted, queue another inference one step further along that
+// path. Each subsequent level requires stricter confidence (the model is
+// effectively narrating the most likely continuation).
+const LOOKAHEAD_THRESHOLDS = [0.45, 0.6, 0.75]; // depth 1, 2, 3
+const MAX_LOOKAHEAD_DEPTH = LOOKAHEAD_THRESHOLDS.length;
+
+function depthFromTip(
+  nodeId: string,
+  nodes: Record<string, TreeNode>,
+  tipNodeId: string
+): number {
+  let cur: TreeNode | undefined = nodes[nodeId];
+  let depth = 0;
+  while (cur) {
+    if (cur.id === tipNodeId) return depth;
+    if (!cur.parentId) return -1;
+    cur = nodes[cur.parentId];
+    depth++;
+    if (depth > 32) return -1;
+  }
+  return -1;
+}
 
 interface AppState {
   prompt: string;
@@ -54,6 +79,36 @@ export const useStore = create<AppState>((set, get) => {
           };
       return { nodes: { ...state.nodes, [nodeId]: next } };
     });
+
+    // Auto-lookahead — only after a final batch (top-50). Streaming gives us
+    // partial results too; we wait until the candidates list is meaningfully
+    // complete before forecasting forward.
+    if (error || !payload || payload.candidates.length < 30) return;
+    const state = get();
+    const node = state.nodes[nodeId];
+    if (!node) return;
+    const depth = depthFromTip(nodeId, state.nodes, state.tipNodeId);
+    if (depth < 0 || depth >= MAX_LOOKAHEAD_DEPTH) return;
+
+    // Highest-logit candidate is the top-1 (worker returns sorted desc).
+    const top1 = payload.candidates[0];
+    if (!top1) return;
+    // Compute its softmax probability with the *current* sampling temperature.
+    // Top-k/top-p don't matter here — the threshold just gauges raw confidence.
+    const probs = softmax(
+      payload.candidates.map((c) => c.logit),
+      state.sampling.temperature
+    );
+    const top1Prob = probs[0];
+    if (top1Prob < LOOKAHEAD_THRESHOLDS[depth]) return;
+
+    const lookaheadId = `${nodeId}/${top1.id}`;
+    if (state.nodes[lookaheadId]) return; // already exists or in flight
+
+    const lookaheadPrompt = node.prompt + top1.text;
+    const lookaheadNode = makeNode(lookaheadId, nodeId, lookaheadPrompt);
+    set({ nodes: { ...get().nodes, [lookaheadId]: lookaheadNode } });
+    requestDistribution(lookaheadId, lookaheadPrompt);
   });
 
   onModelStatus((msg) => {
