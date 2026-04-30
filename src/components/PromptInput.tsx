@@ -1,7 +1,11 @@
 import { useEffect, useState } from 'react';
 import { useStore } from '../store';
 
-const DEBOUNCE_MS = 150;
+// Wait until the user pauses before re-inferring. Shorter feels responsive
+// but causes the candidate distribution to thrash on every keystroke (each
+// tokenization produces a different top-K). 400ms catches natural typing
+// pauses between words while still feeling snappy.
+const DEBOUNCE_MS = 400;
 
 export function PromptInput() {
   const setPrompt = useStore((s) => s.setPrompt);

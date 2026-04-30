@@ -138,7 +138,11 @@ function buildGraphData(
     ordered.forEach((o) => {
       const isTop = o.rank === 0;
       const isChosen = chosenText !== null && o.candidate.text === chosenText;
-      const id = `fan-${tn.id}-${o.candidate.id}`;
+      // Identity by *text* (not numeric token id) so candidates that recur
+      // across consecutive inferences keep their physics position. As the
+      // user types, "going" stays put even though the underlying token id
+      // / rank / probability shift slightly between each keystroke.
+      const id = `fan-${tn.id}-${o.candidate.text}`;
       // For new nodes, seed position near the anchor so they ease in instead
       // of shooting from origin. Existing nodes are preserved by the library.
       const hint = positionHints.get(id) ?? positionHints.get(anchorChainNodeId);
@@ -174,6 +178,7 @@ function buildGraphData(
           ? 0.85
           : 0.18 * fadeFactor;
       links.push({
+        // Match the new text-based id so links stay attached.
         source: anchorChainNodeId,
         target: id,
         alive: o.alive,
@@ -409,17 +414,20 @@ export function MeshCanvas() {
 
   }, [graphData]);
 
-  // Track tip-id and chain-length signature. Only re-fit camera when the
-  // *structure* of the chain genuinely changes (new tip, prompt extended),
-  // not on every keystroke / sampling slider drag.
-  const chainSignature = `${tipNodeId}:${tipNode?.inputTokens?.length ?? 0}`;
+  // Auto-fit ONCE when the graph first becomes populated. After that, the
+  // camera stays put across keystrokes / clicks / slider drags so the view
+  // doesn't keep snapping back. The user can re-orient with orbit/pan/zoom.
+  const hasFitOnceRef = useRef(false);
   useEffect(() => {
+    if (graphData.nodes.length === 0) {
+      hasFitOnceRef.current = false; // re-arm for next prompt session
+      return;
+    }
+    if (hasFitOnceRef.current) return;
     const fg = fgRef.current as
-      | { zoomToFit: (ms?: number, padding?: number) => void }
+      | { zoomToFit: (ms?: number, padding?: number, filter?: unknown) => void }
       | null;
     if (!fg) return;
-    // Focus the camera only on the active region (tip + its candidates).
-    // Long chains no longer pull the frame back as the prompt grows.
     type ZoomFitFn = (
       ms?: number,
       padding?: number,
@@ -428,17 +436,14 @@ export function MeshCanvas() {
     const fitter = fg.zoomToFit as unknown as ZoomFitFn;
     const activeOnly = (n: { isTip?: boolean; isActive?: boolean; kind?: string }) =>
       !!n.isTip || (n.kind === 'candidate' && !!n.isActive);
-    const t1 = window.setTimeout(() => {
-      try { fitter(800, 100, activeOnly); } catch { /* unmounted */ }
+    const t = window.setTimeout(() => {
+      try {
+        fitter(800, 100, activeOnly);
+        hasFitOnceRef.current = true;
+      } catch { /* unmounted */ }
     }, 1500);
-    const t2 = window.setTimeout(() => {
-      try { fitter(600, 100, activeOnly); } catch { /* unmounted */ }
-    }, 3500);
-    return () => {
-      window.clearTimeout(t1);
-      window.clearTimeout(t2);
-    };
-  }, [chainSignature]);
+    return () => window.clearTimeout(t);
+  }, [graphData]);
 
   if (!tipNode) return <FallbackOverlay message="Loading..." />;
   if (tipNode.status === 'error') {
