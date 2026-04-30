@@ -104,17 +104,8 @@ function buildGraphData(
       fy: 0,
       fz: 0
     });
-    if (chainNodeIds.length > 1) {
-      links.push({
-        source: chainNodeIds[chainNodeIds.length - 2],
-        target: id,
-        alive: true,
-        isChain: true,
-        isTopFan: false,
-        isActiveFan: false,
-        intensity: 0.85 + 0.15 * decay
-      });
-    }
+    // No chain-to-chain edge: the horizontal layout + textarea already convey
+    // the sequence, and a bright line through the words obscures them.
   }
 
   treeChain.forEach((tn, treeIdx) => {
@@ -296,16 +287,26 @@ export function MeshCanvas() {
   const fgRef = useRef<unknown>(null);
   const positionsRef = useRef<Map<string, { x: number; y: number; z: number }>>(new Map());
   const graphDataRef = useRef<GraphData>({ nodes: [], links: [] });
-  const [size, setSize] = useState({ width: 800, height: 600 });
+  // Track the container's measured size so the canvas fills it on mount and
+  // tracks viewport changes (the lib's auto-sizing reads from layout once).
+  const [size, setSize] = useState<{ width: number; height: number } | null>(null);
 
   useEffect(() => {
     const el = containerRef.current;
     if (!el) return;
-    const measure = () => setSize({ width: el.clientWidth, height: el.clientHeight });
-    measure();
+    const measure = () => {
+      const w = el.clientWidth;
+      const h = el.clientHeight;
+      if (w > 0 && h > 0) setSize({ width: w, height: h });
+    };
+    // requestAnimationFrame ensures CSS layout has settled before we read.
+    const raf = requestAnimationFrame(measure);
     const ro = new ResizeObserver(measure);
     ro.observe(el);
-    return () => ro.disconnect();
+    return () => {
+      cancelAnimationFrame(raf);
+      ro.disconnect();
+    };
   }, []);
 
   const graphData: GraphData = useMemo(
@@ -461,8 +462,8 @@ export function MeshCanvas() {
     >
       <ForceGraph3D
         ref={fgRef as never}
-        width={size.width}
-        height={size.height}
+        width={size?.width}
+        height={size?.height}
         graphData={graphData}
         backgroundColor="rgba(0,0,0,0)"
         showNavInfo={false}
@@ -474,7 +475,6 @@ export function MeshCanvas() {
         linkWidth={(l) => {
           const link = l as unknown as GraphLink;
           if (link.isTopFan) return 2.5;
-          if (link.isChain) return 2.0;
           if (link.isActiveFan && link.alive) return 0.9 + 1.2 * link.intensity;
           return 0.3 + 0.4 * link.intensity;
         }}
