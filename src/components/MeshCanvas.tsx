@@ -1,3 +1,4 @@
+import type { ReactNode } from 'react';
 import { Suspense, useMemo, useRef } from 'react';
 import { Canvas, useFrame } from '@react-three/fiber';
 import { Html, Line, OrbitControls, Stars } from '@react-three/drei';
@@ -197,18 +198,80 @@ function buildScene(
   return { chain, fans, edges, tipPosition };
 }
 
-interface BubbleVizProps {
-  position: [number, number, number];
+function hashPhase(key: string): number {
+  let h = 0;
+  for (let i = 0; i < key.length; i++) h = (h * 31 + key.charCodeAt(i)) >>> 0;
+  return (h % 10000) / 10000;
+}
+
+function FloatingGroup({
+  targetPosition,
+  phase,
+  ampX = 0.04,
+  ampY = 0.06,
+  ampZ = 0.04,
+  speed = 0.55,
+  lerpSpeed = 5,
+  children
+}: {
+  targetPosition: [number, number, number];
+  phase: number;
+  ampX?: number;
+  ampY?: number;
+  ampZ?: number;
+  speed?: number;
+  lerpSpeed?: number;
+  children: ReactNode;
+}) {
+  const ref = useRef<THREE.Group>(null);
+  const current = useRef(new THREE.Vector3(...targetPosition));
+  const target = useRef(new THREE.Vector3(...targetPosition));
+
+  target.current.set(...targetPosition);
+
+  useFrame((state, delta) => {
+    if (!ref.current) return;
+    const lerpFactor = Math.min(delta * lerpSpeed, 1);
+    current.current.lerp(target.current, lerpFactor);
+    const t = state.clock.getElapsedTime();
+    ref.current.position.set(
+      current.current.x + Math.sin(t * speed + phase * 6.28) * ampX,
+      current.current.y + Math.sin(t * (speed * 0.85) + phase * 9.42) * ampY,
+      current.current.z + Math.cos(t * (speed * 0.7) + phase * 5.0) * ampZ
+    );
+  });
+
+  return <group ref={ref}>{children}</group>;
+}
+
+function BreathingMesh({
+  radius,
+  fillColor,
+  emissive,
+  emissiveIntensity,
+  opacity,
+  phase,
+  amplitude = 0.025,
+  speed = 1.1
+}: {
   radius: number;
   fillColor: string;
   emissive: string;
   emissiveIntensity: number;
   opacity: number;
-}
-
-function Bubble({ position, radius, fillColor, emissive, emissiveIntensity, opacity }: BubbleVizProps) {
+  phase: number;
+  amplitude?: number;
+  speed?: number;
+}) {
+  const ref = useRef<THREE.Mesh>(null);
+  useFrame((state) => {
+    if (!ref.current) return;
+    const t = state.clock.getElapsedTime();
+    const s = 1 + Math.sin(t * speed + phase * 6.28) * amplitude;
+    ref.current.scale.set(s, s, s);
+  });
   return (
-    <mesh position={position}>
+    <mesh ref={ref}>
       <sphereGeometry args={[radius, 32, 32]} />
       <meshStandardMaterial
         color={fillColor}
@@ -325,33 +388,46 @@ function Scene() {
         />
       ))}
 
-      {chain.map((b) => (
-        <group key={b.key} position={b.position}>
-          <Bubble
-            position={[0, 0, 0]}
-            radius={b.radius}
-            fillColor="#1e293b"
-            emissive="#3b82f6"
-            emissiveIntensity={0.15 + 0.4 * b.decay}
-            opacity={0.55 + 0.4 * b.decay}
-          />
-          <Html center distanceFactor={8} style={{ pointerEvents: 'none' }}>
-            <div
-              style={{
-                color: '#cbd5e1',
-                opacity: 0.45 + 0.55 * b.decay,
-                fontFamily: 'ui-monospace, monospace',
-                fontSize: `${Math.max(11, 9 + 6 * b.decay)}px`,
-                whiteSpace: 'nowrap',
-                userSelect: 'none',
-                textShadow: '0 1px 4px rgba(0,0,0,0.6)'
-              }}
-            >
-              {renderToken(b.text)}
-            </div>
-          </Html>
-        </group>
-      ))}
+      {chain.map((b) => {
+        const phase = hashPhase(b.key);
+        return (
+          <FloatingGroup
+            key={b.key}
+            targetPosition={b.position}
+            phase={phase}
+            ampX={0.06 * b.decay}
+            ampY={0.1 * b.decay}
+            ampZ={0.06 * b.decay}
+            speed={0.42}
+          >
+            <BreathingMesh
+              radius={b.radius}
+              fillColor="#1e293b"
+              emissive="#3b82f6"
+              emissiveIntensity={0.15 + 0.4 * b.decay}
+              opacity={0.55 + 0.4 * b.decay}
+              phase={phase}
+              amplitude={0.018 * b.decay}
+              speed={0.85}
+            />
+            <Html center distanceFactor={8} style={{ pointerEvents: 'none' }}>
+              <div
+                style={{
+                  color: '#cbd5e1',
+                  opacity: 0.45 + 0.55 * b.decay,
+                  fontFamily: 'ui-monospace, monospace',
+                  fontSize: `${Math.max(11, 9 + 6 * b.decay)}px`,
+                  whiteSpace: 'nowrap',
+                  userSelect: 'none',
+                  textShadow: '0 1px 4px rgba(0,0,0,0.6)'
+                }}
+              >
+                {renderToken(b.text)}
+              </div>
+            </Html>
+          </FloatingGroup>
+        );
+      })}
 
       {fans.map((f) => {
         const fillOpacity = f.isActive
@@ -370,69 +446,81 @@ function Scene() {
           : f.isChosen
             ? 0.7
             : 0.15;
+        const phase = hashPhase(f.key);
+        const ampScale = f.isActive ? (f.isTop ? 0.5 : 1) : 0.5;
         return (
-          <group
+          <FloatingGroup
             key={f.key}
-            position={f.position}
-            onPointerOver={(e) => {
-              e.stopPropagation();
-              setHover(f.treeNodeId, f.candidateIndex);
-              document.body.style.cursor = 'pointer';
-            }}
-            onPointerOut={() => {
-              setHover(null, null);
-              document.body.style.cursor = '';
-            }}
-            onClick={(e) => {
-              e.stopPropagation();
-              if (f.isActive) expand(f.treeNodeId, f.candidate);
-            }}
+            targetPosition={f.position}
+            phase={phase}
+            ampX={0.18 * ampScale}
+            ampY={0.22 * ampScale}
+            ampZ={0.16 * ampScale}
+            speed={0.6 + (phase - 0.5) * 0.25}
           >
-            {f.isTop && f.isActive && (
-              <>
-                <mesh>
-                  <sphereGeometry args={[f.radius * 1.55, 32, 32]} />
-                  <meshBasicMaterial color="#7cb1ff" transparent opacity={0.08} />
-                </mesh>
-                <mesh>
-                  <sphereGeometry args={[f.radius * 1.25, 32, 32]} />
-                  <meshBasicMaterial color="#a5c8ff" transparent opacity={0.14} />
-                </mesh>
-                <PulsingTopBubble
-                  position={[0, 0, 0]}
+            <group
+              onPointerOver={(e) => {
+                e.stopPropagation();
+                setHover(f.treeNodeId, f.candidateIndex);
+                document.body.style.cursor = 'pointer';
+              }}
+              onPointerOut={() => {
+                setHover(null, null);
+                document.body.style.cursor = '';
+              }}
+              onClick={(e) => {
+                e.stopPropagation();
+                if (f.isActive) expand(f.treeNodeId, f.candidate);
+              }}
+            >
+              {f.isTop && f.isActive && (
+                <>
+                  <mesh>
+                    <sphereGeometry args={[f.radius * 1.55, 32, 32]} />
+                    <meshBasicMaterial color="#7cb1ff" transparent opacity={0.08} />
+                  </mesh>
+                  <mesh>
+                    <sphereGeometry args={[f.radius * 1.25, 32, 32]} />
+                    <meshBasicMaterial color="#a5c8ff" transparent opacity={0.14} />
+                  </mesh>
+                  <PulsingTopBubble
+                    position={[0, 0, 0]}
+                    radius={f.radius}
+                    fillColor="#5b9dff"
+                    emissive="#a5c8ff"
+                  />
+                </>
+              )}
+              {!(f.isTop && f.isActive) && (
+                <BreathingMesh
                   radius={f.radius}
                   fillColor="#5b9dff"
-                  emissive="#a5c8ff"
+                  emissive="#7cb1ff"
+                  emissiveIntensity={emissiveBoost}
+                  opacity={fillOpacity}
+                  phase={phase}
+                  amplitude={0.03 * ampScale}
+                  speed={0.95 + phase * 0.4}
                 />
-              </>
-            )}
-            {!(f.isTop && f.isActive) && (
-              <Bubble
-                position={[0, 0, 0]}
-                radius={f.radius}
-                fillColor="#5b9dff"
-                emissive="#7cb1ff"
-                emissiveIntensity={emissiveBoost}
-                opacity={fillOpacity}
-              />
-            )}
-            <Html center distanceFactor={8} style={{ pointerEvents: 'none' }}>
-              <div
-                style={{
-                  color: f.alive || f.isChosen ? '#ffffff' : '#475569',
-                  opacity: f.isActive ? (f.alive ? 1 : 0.5) : f.isChosen ? 0.85 : 0.5,
-                  fontFamily: 'ui-monospace, monospace',
-                  fontSize: f.isTop && f.isActive ? '14px' : '11px',
-                  fontWeight: f.isTop && f.isActive ? 600 : 400,
-                  whiteSpace: 'nowrap',
-                  userSelect: 'none',
-                  textShadow: '0 1px 4px rgba(0,0,0,0.7)'
-                }}
-              >
-                {renderToken(f.candidate.text)}
-              </div>
-            </Html>
-          </group>
+              )}
+              <Html center distanceFactor={8} style={{ pointerEvents: 'none' }}>
+                <div
+                  style={{
+                    color: f.alive || f.isChosen ? '#ffffff' : '#475569',
+                    opacity: f.isActive ? (f.alive ? 1 : 0.5) : f.isChosen ? 0.85 : 0.5,
+                    fontFamily: 'ui-monospace, monospace',
+                    fontSize: f.isTop && f.isActive ? '14px' : '11px',
+                    fontWeight: f.isTop && f.isActive ? 600 : 400,
+                    whiteSpace: 'nowrap',
+                    userSelect: 'none',
+                    textShadow: '0 1px 4px rgba(0,0,0,0.7)'
+                  }}
+                >
+                  {renderToken(f.candidate.text)}
+                </div>
+              </Html>
+            </group>
+          </FloatingGroup>
         );
       })}
     </>
