@@ -2,6 +2,7 @@
 import { AutoTokenizer, AutoModelForCausalLM, env } from '@huggingface/transformers';
 import type {
   CandidateToken,
+  InputToken,
   WorkerInbound,
   WorkerOutbound
 } from '../types';
@@ -40,13 +41,27 @@ async function ensureModel(): Promise<void> {
   }
 }
 
-async function computeDistribution(prompt: string): Promise<CandidateToken[]> {
+interface InferenceResult {
+  inputTokens: InputToken[];
+  candidates: CandidateToken[];
+}
+
+async function computeDistribution(prompt: string): Promise<InferenceResult> {
   const tokenizer = await tokenizerPromise!;
   const model = await modelPromise!;
 
   const safePrompt = prompt.length === 0 ? '\n' : prompt;
   // reason: tokenizer call return type is a polymorphic union in the library types; casting to any to avoid inference failure
-  const encoded = await (tokenizer as unknown as (text: string, opts: object) => Promise<unknown>)(safePrompt, { return_tensors: 'pt' });
+  const encoded = await (tokenizer as unknown as (text: string, opts: object) => Promise<{ input_ids: import('@huggingface/transformers').Tensor }>)(safePrompt, { return_tensors: 'pt' });
+
+  const inputIdsTensor = encoded.input_ids;
+  // reason: input_ids tensor data is BigInt64Array on most paths; coerce to numbers for our InputToken[]
+  const inputIdsRaw = Array.from(inputIdsTensor.data as unknown as Iterable<number | bigint>).map((v) => Number(v));
+  const inputTokens: InputToken[] = inputIdsRaw.map((id) => ({
+    id,
+    text: tokenizer.decode([id], { skip_special_tokens: false })
+  }));
+
   // reason: model forward pass return type is not narrowed; casting to any to access logits tensor
   const out = await (model as unknown as (inputs: unknown) => Promise<{ logits: import('@huggingface/transformers').Tensor }>)(encoded);
 
@@ -60,11 +75,13 @@ async function computeDistribution(prompt: string): Promise<CandidateToken[]> {
   indexed.sort((a, b) => b.logit - a.logit);
   const top = indexed.slice(0, TOP_K);
 
-  return top.map(({ id, logit }) => ({
+  const candidates: CandidateToken[] = top.map(({ id, logit }) => ({
     id,
     logit,
     text: tokenizer.decode([id], { skip_special_tokens: false })
   }));
+
+  return { inputTokens, candidates };
 }
 
 self.addEventListener('message', async (ev: MessageEvent<WorkerInbound>) => {
@@ -72,8 +89,8 @@ self.addEventListener('message', async (ev: MessageEvent<WorkerInbound>) => {
   if (msg.type !== 'distribution-request') return;
   try {
     await ensureModel();
-    const candidates = await computeDistribution(msg.prompt);
-    post({ type: 'distribution-response', nodeId: msg.nodeId, candidates });
+    const { inputTokens, candidates } = await computeDistribution(msg.prompt);
+    post({ type: 'distribution-response', nodeId: msg.nodeId, inputTokens, candidates });
   } catch (err) {
     post({
       type: 'distribution-error',

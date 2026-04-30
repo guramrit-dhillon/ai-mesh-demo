@@ -10,6 +10,7 @@ import { onDistribution, onModelStatus, requestDistribution } from './inference/
 interface AppState {
   prompt: string;
   rootNodeId: string;
+  tipNodeId: string;
   nodes: Record<string, TreeNode>;
   hoveredNodeId: string | null;
   hoveredCandidateIndex: number | null;
@@ -21,22 +22,36 @@ interface AppState {
   setSampling: (next: Partial<SamplingParams>) => void;
   setHover: (nodeId: string | null, candidateIndex: number | null) => void;
   expand: (parentNodeId: string, candidate: CandidateToken) => void;
+  setTip: (nodeId: string) => void;
 }
 
 const ROOT_ID = 'root';
 
 function makeNode(id: string, parentId: string | null, prompt: string): TreeNode {
-  return { id, parentId, prompt, candidates: null, status: 'loading', error: null };
+  return {
+    id,
+    parentId,
+    prompt,
+    inputTokens: null,
+    candidates: null,
+    status: 'loading',
+    error: null
+  };
 }
 
 export const useStore = create<AppState>((set, get) => {
-  onDistribution((nodeId, candidates, error) => {
+  onDistribution((nodeId, payload, error) => {
     set((state) => {
       const node = state.nodes[nodeId];
       if (!node) return state;
       const next: TreeNode = error
         ? { ...node, status: 'error', error }
-        : { ...node, status: 'ready', candidates };
+        : {
+            ...node,
+            status: 'ready',
+            inputTokens: payload!.inputTokens,
+            candidates: payload!.candidates
+          };
       return { nodes: { ...state.nodes, [nodeId]: next } };
     });
   });
@@ -48,6 +63,7 @@ export const useStore = create<AppState>((set, get) => {
   return {
     prompt: '',
     rootNodeId: ROOT_ID,
+    tipNodeId: ROOT_ID,
     nodes: { [ROOT_ID]: makeNode(ROOT_ID, null, '') },
     hoveredNodeId: null,
     hoveredCandidateIndex: null,
@@ -57,23 +73,37 @@ export const useStore = create<AppState>((set, get) => {
 
     setPrompt: (prompt) => {
       const root = makeNode(ROOT_ID, null, prompt);
-      set({ prompt, nodes: { [ROOT_ID]: root }, hoveredNodeId: null, hoveredCandidateIndex: null });
+      set({
+        prompt,
+        nodes: { [ROOT_ID]: root },
+        tipNodeId: ROOT_ID,
+        hoveredNodeId: null,
+        hoveredCandidateIndex: null
+      });
       requestDistribution(ROOT_ID, prompt);
     },
 
     setSampling: (next) => set({ sampling: { ...get().sampling, ...next } }),
 
-    setHover: (nodeId, candidateIndex) => set({ hoveredNodeId: nodeId, hoveredCandidateIndex: candidateIndex }),
+    setHover: (nodeId, candidateIndex) =>
+      set({ hoveredNodeId: nodeId, hoveredCandidateIndex: candidateIndex }),
 
     expand: (parentNodeId, candidate) => {
       const parent = get().nodes[parentNodeId];
       if (!parent) return;
       const newPrompt = parent.prompt + candidate.text;
       const newId = `${parentNodeId}/${candidate.id}`;
-      if (get().nodes[newId]) return;
+      if (get().nodes[newId]) {
+        set({ tipNodeId: newId });
+        return;
+      }
       const node = makeNode(newId, parentNodeId, newPrompt);
-      set({ nodes: { ...get().nodes, [newId]: node } });
+      set({ nodes: { ...get().nodes, [newId]: node }, tipNodeId: newId });
       requestDistribution(newId, newPrompt);
+    },
+
+    setTip: (nodeId) => {
+      if (get().nodes[nodeId]) set({ tipNodeId: nodeId });
     }
   };
 });

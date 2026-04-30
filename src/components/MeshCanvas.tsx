@@ -1,92 +1,125 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
-import ForceGraph2D from 'react-force-graph-2d';
+import { useEffect, useRef, useState } from 'react';
 import { useStore } from '../store';
 import { score } from '../sampling';
 import { renderToken } from '../tokens';
-import type { CandidateToken, TreeNode } from '../types';
+import type { CandidateToken, InputToken } from '../types';
 
-interface GraphNode {
-  id: string;
-  treeNodeId: string;
+const MIN_R = 6;
+const MAX_R = 28;
+const TOP_HALO_R = 36;
+const CHAIN_SPACING = 110;
+const FAN_VERTICAL_SPACING = 50;
+const FAN_GAP = 110;
+const VISIBLE_FAN = 12;
+const PADDING_LEFT = 60;
+
+interface ChainBubble {
+  key: string;
+  text: string;
+  x: number;
+  y: number;
+  r: number;
+  decay: number;
+}
+
+interface FanBubble {
+  key: string;
   candidateIndex: number;
   candidate: CandidateToken;
   prob: number;
   alive: boolean;
   rank: number;
-  isRoot: boolean;
+  x: number;
+  y: number;
+  r: number;
 }
 
-interface GraphLink {
-  source: string;
-  target: string;
-  alive: boolean;
+function decayFor(distance: number): number {
+  return Math.pow(0.78, distance);
 }
 
-const MIN_R = 6;
-const MAX_R = 26;
-const VISIBLE_PER_NODE = 12;
+function buildChain(inputTokens: InputToken[], centerY: number): ChainBubble[] {
+  return inputTokens.map((tok, i) => {
+    const distance = inputTokens.length - 1 - i;
+    const decay = decayFor(distance);
+    const r = MIN_R + (MAX_R - MIN_R) * decay;
+    return {
+      key: `chain-${i}`,
+      text: tok.text,
+      x: PADDING_LEFT + i * CHAIN_SPACING,
+      y: centerY,
+      r,
+      decay
+    };
+  });
+}
 
-function buildGraph(
-  nodes: Record<string, TreeNode>,
-  rootId: string,
-  sampling: ReturnType<typeof useStore.getState>['sampling']
-): { nodes: GraphNode[]; links: GraphLink[] } {
-  const gNodes: GraphNode[] = [];
-  const gLinks: GraphLink[] = [];
+function buildFan(
+  candidates: CandidateToken[],
+  sampling: ReturnType<typeof useStore.getState>['sampling'],
+  tipX: number,
+  centerY: number
+): FanBubble[] {
+  const visible = Math.min(candidates.length, VISIBLE_FAN);
+  const scored = score(
+    candidates.map((c) => c.logit),
+    sampling
+  );
+  const ordered = scored
+    .map((s, i) => ({ ...s, candidate: candidates[i], originalIndex: i }))
+    .sort((a, b) => a.rank - b.rank)
+    .slice(0, visible);
 
-  function visit(treeNodeId: string, parentCandidateId: string | null, depth: number): void {
-    const tn = nodes[treeNodeId];
-    if (!tn || !tn.candidates) return;
+  const rankZero = ordered.find((o) => o.rank === 0);
+  const others = ordered.filter((o) => o.rank !== 0);
 
-    const visibleCount = Math.min(tn.candidates.length, VISIBLE_PER_NODE);
-    const scored = score(
-      tn.candidates.map((c) => c.logit),
-      sampling
-    );
+  const fan: FanBubble[] = [];
 
-    for (let i = 0; i < visibleCount; i++) {
-      const cand: CandidateToken = tn.candidates[i];
-      const s = scored[i];
-      const gid = `${treeNodeId}#${i}`;
-      gNodes.push({
-        id: gid,
-        treeNodeId,
-        candidateIndex: i,
-        candidate: cand,
-        prob: s.prob,
-        alive: s.alive,
-        rank: s.rank,
-        isRoot: depth === 0 && i === 0
-      });
-
-      if (parentCandidateId) {
-        gLinks.push({ source: parentCandidateId, target: gid, alive: s.alive });
-      }
-
-      const childTreeNodeId = `${treeNodeId}/${cand.id}`;
-      if (nodes[childTreeNodeId]) {
-        visit(childTreeNodeId, gid, depth + 1);
-      }
-    }
+  if (rankZero) {
+    const r = TOP_HALO_R;
+    fan.push({
+      key: `fan-${rankZero.originalIndex}`,
+      candidateIndex: rankZero.originalIndex,
+      candidate: rankZero.candidate,
+      prob: rankZero.prob,
+      alive: rankZero.alive,
+      rank: rankZero.rank,
+      x: tipX + FAN_GAP,
+      y: centerY,
+      r
+    });
   }
 
-  visit(rootId, null, 0);
-  return { nodes: gNodes, links: gLinks };
+  const halfCount = others.length;
+  const startY = centerY - ((halfCount - 1) * FAN_VERTICAL_SPACING) / 2 - FAN_VERTICAL_SPACING * 0.6;
+  others.forEach((o, idx) => {
+    const r = MIN_R + (MAX_R - MIN_R) * Math.sqrt(o.prob);
+    const isAbove = idx < halfCount / 2;
+    const offsetIdx = isAbove ? idx : idx + 1;
+    const y = startY + offsetIdx * FAN_VERTICAL_SPACING;
+    const x = tipX + FAN_GAP + (isAbove ? -20 : 20);
+    fan.push({
+      key: `fan-${o.originalIndex}`,
+      candidateIndex: o.originalIndex,
+      candidate: o.candidate,
+      prob: o.prob,
+      alive: o.alive,
+      rank: o.rank,
+      x,
+      y,
+      r
+    });
+  });
+
+  return fan;
 }
 
 export function MeshCanvas() {
-  const nodes = useStore((s) => s.nodes);
-  const rootId = useStore((s) => s.rootNodeId);
+  const tipNodeId = useStore((s) => s.tipNodeId);
+  const tipNode = useStore((s) => s.nodes[s.tipNodeId]);
   const sampling = useStore((s) => s.sampling);
   const expand = useStore((s) => s.expand);
   const setHover = useStore((s) => s.setHover);
-
-  const rootNode = nodes[rootId];
-
-  const graphData = useMemo(
-    () => buildGraph(nodes, rootId, sampling),
-    [nodes, rootId, sampling]
-  );
 
   const containerRef = useRef<HTMLDivElement>(null);
   const [size, setSize] = useState({ width: 800, height: 600 });
@@ -101,7 +134,21 @@ export function MeshCanvas() {
     return () => ro.disconnect();
   }, []);
 
-  if (!rootNode || rootNode.status === 'loading') {
+  if (!tipNode || tipNode.status === 'loading' || !tipNode.inputTokens || !tipNode.candidates) {
+    if (tipNode?.status === 'error') {
+      return (
+        <div className="flex h-full items-center justify-center text-red-400">
+          Inference error: {tipNode.error}
+        </div>
+      );
+    }
+    if (tipNode && tipNode.status === 'loading' && tipNode.prompt === '') {
+      return (
+        <div className="flex h-full items-center justify-center text-slate-500">
+          Type a prompt below to see the mesh.
+        </div>
+      );
+    }
     return (
       <div className="flex h-full items-center justify-center text-slate-500">
         Computing distribution...
@@ -109,77 +156,125 @@ export function MeshCanvas() {
     );
   }
 
-  if (rootNode.status === 'error') {
-    return (
-      <div className="flex h-full items-center justify-center text-red-400">
-        Inference error: {rootNode.error}
-      </div>
-    );
-  }
+  const centerY = Math.max(size.height / 2, 240);
+  const chain = buildChain(tipNode.inputTokens, centerY);
+  const tip = chain[chain.length - 1];
+  const tipX = tip ? tip.x : PADDING_LEFT;
+  const fan = buildFan(tipNode.candidates, sampling, tipX, centerY);
 
-  if (!rootNode.candidates || rootNode.candidates.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center text-slate-500">
-        Type a prompt below to see the mesh.
-      </div>
-    );
-  }
+  const svgWidth = Math.max(size.width, tipX + FAN_GAP + 120);
+  const svgHeight = Math.max(size.height, 520);
 
   return (
-    <div ref={containerRef} className="h-full w-full">
-      <ForceGraph2D
-        width={size.width}
-        height={size.height}
-        graphData={graphData}
-        backgroundColor="rgba(0,0,0,0)"
-        cooldownTicks={120}
-        d3VelocityDecay={0.35}
-        linkColor={(l: { alive?: boolean }) =>
-          l.alive ? 'rgba(91,157,255,0.5)' : 'rgba(91,157,255,0.1)'
-        }
-        linkWidth={1}
-        nodeRelSize={1}
-        nodeCanvasObject={(node, ctx, globalScale) => {
-          const n = node as unknown as GraphNode & { x?: number; y?: number };
-          if (n.x === undefined || n.y === undefined) return;
-          const r = MIN_R + (MAX_R - MIN_R) * Math.sqrt(n.prob);
-          ctx.beginPath();
-          ctx.arc(n.x, n.y, r, 0, 2 * Math.PI);
-          ctx.fillStyle = n.alive
-            ? `rgba(91,157,255,${0.3 + 0.7 * n.prob})`
-            : 'rgba(91,157,255,0.08)';
-          ctx.fill();
-          ctx.strokeStyle = n.alive ? 'rgba(91,157,255,0.9)' : 'rgba(91,157,255,0.25)';
-          ctx.lineWidth = 1.5;
-          ctx.stroke();
-          ctx.fillStyle = n.alive ? '#fff' : '#64748b';
-          ctx.font = `${11 / globalScale}px ui-monospace, monospace`;
-          ctx.textAlign = 'center';
-          ctx.textBaseline = 'middle';
-          ctx.fillText(renderToken(n.candidate.text), n.x, n.y);
-        }}
-        nodePointerAreaPaint={(node, color, ctx) => {
-          const n = node as unknown as GraphNode & { x?: number; y?: number };
-          if (n.x === undefined || n.y === undefined) return;
-          const r = MIN_R + (MAX_R - MIN_R) * Math.sqrt(n.prob);
-          ctx.fillStyle = color;
-          ctx.beginPath();
-          ctx.arc(n.x, n.y, r, 0, 2 * Math.PI);
-          ctx.fill();
-        }}
-        onNodeClick={(node) => {
-          const n = node as unknown as GraphNode;
-          expand(n.treeNodeId, n.candidate);
-        }}
-        onNodeHover={(node) => {
-          if (!node) {
-            setHover(null, null);
-            return;
-          }
-          const n = node as unknown as GraphNode;
-          setHover(n.treeNodeId, n.candidateIndex);
-        }}
-      />
+    <div ref={containerRef} className="h-full w-full overflow-auto">
+      <svg width={svgWidth} height={svgHeight} className="block">
+        {chain.map((b, i) => {
+          if (i === 0) return null;
+          const prev = chain[i - 1];
+          return (
+            <line
+              key={`chain-edge-${i}`}
+              x1={prev.x}
+              y1={prev.y}
+              x2={b.x}
+              y2={b.y}
+              stroke="#5b9dff"
+              strokeOpacity={0.15 + 0.6 * b.decay}
+              strokeWidth={1 + 1.5 * b.decay}
+            />
+          );
+        })}
+
+        {fan.map((f) => (
+          <line
+            key={`fan-edge-${f.key}`}
+            x1={tip ? tip.x : 0}
+            y1={tip ? tip.y : centerY}
+            x2={f.x}
+            y2={f.y}
+            stroke="#5b9dff"
+            strokeOpacity={f.alive ? 0.35 + 0.45 * f.prob : 0.08}
+            strokeWidth={f.rank === 0 ? 2 : 1}
+          />
+        ))}
+
+        {chain.map((b) => (
+          <g key={b.key}>
+            <circle
+              cx={b.x}
+              cy={b.y}
+              r={b.r}
+              fill="#1e293b"
+              fillOpacity={0.3 + 0.5 * b.decay}
+              stroke="#5b9dff"
+              strokeOpacity={0.25 + 0.65 * b.decay}
+              strokeWidth={1.5}
+            />
+            <text
+              x={b.x}
+              y={b.y}
+              textAnchor="middle"
+              dominantBaseline="middle"
+              fontFamily="ui-monospace, monospace"
+              fontSize={Math.max(9, 8 + 5 * b.decay)}
+              fill="#cbd5e1"
+              opacity={0.4 + 0.6 * b.decay}
+            >
+              {renderToken(b.text)}
+            </text>
+          </g>
+        ))}
+
+        {fan
+          .slice()
+          .sort((a, b) => (a.rank === 0 ? 1 : 0) - (b.rank === 0 ? 1 : 0))
+          .map((f) => {
+            const isTop = f.rank === 0;
+            return (
+              <g
+                key={f.key}
+                onMouseEnter={() => setHover(tipNodeId, f.candidateIndex)}
+                onMouseLeave={() => setHover(null, null)}
+                onClick={() => expand(tipNodeId, f.candidate)}
+                style={{ cursor: 'pointer' }}
+              >
+                {isTop && (
+                  <circle
+                    cx={f.x}
+                    cy={f.y}
+                    r={f.r + 8}
+                    fill="none"
+                    stroke="#5b9dff"
+                    strokeOpacity={0.25}
+                    strokeWidth={2}
+                  />
+                )}
+                <circle
+                  cx={f.x}
+                  cy={f.y}
+                  r={f.r}
+                  fill="#5b9dff"
+                  fillOpacity={f.alive ? (isTop ? 0.95 : 0.3 + 0.6 * f.prob) : 0.08}
+                  stroke="#5b9dff"
+                  strokeOpacity={f.alive ? 0.95 : 0.2}
+                  strokeWidth={isTop ? 2 : 1}
+                />
+                <text
+                  x={f.x}
+                  y={f.y}
+                  textAnchor="middle"
+                  dominantBaseline="middle"
+                  fontFamily="ui-monospace, monospace"
+                  fontSize={isTop ? 13 : 11}
+                  fontWeight={isTop ? 600 : 400}
+                  fill={f.alive ? '#fff' : '#64748b'}
+                >
+                  {renderToken(f.candidate.text)}
+                </text>
+              </g>
+            );
+          })}
+      </svg>
     </div>
   );
 }

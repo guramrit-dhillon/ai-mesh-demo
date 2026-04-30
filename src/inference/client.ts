@@ -1,5 +1,6 @@
 import type {
   CandidateToken,
+  InputToken,
   ModelStatus,
   WorkerInbound,
   WorkerOutbound
@@ -7,7 +8,7 @@ import type {
 
 type DistributionListener = (
   nodeId: string,
-  candidates: CandidateToken[] | null,
+  payload: { inputTokens: InputToken[]; candidates: CandidateToken[] } | null,
   error: string | null
 ) => void;
 
@@ -23,7 +24,8 @@ function ensureWorker(): Worker {
   worker.addEventListener('message', (ev: MessageEvent<WorkerOutbound>) => {
     const msg = ev.data;
     if (msg.type === 'distribution-response') {
-      for (const fn of distributionListeners) fn(msg.nodeId, msg.candidates, null);
+      const payload = { inputTokens: msg.inputTokens, candidates: msg.candidates };
+      for (const fn of distributionListeners) fn(msg.nodeId, payload, null);
     } else if (msg.type === 'distribution-error') {
       for (const fn of distributionListeners) fn(msg.nodeId, null, msg.error);
     } else if (msg.type === 'model-status') {

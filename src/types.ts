@@ -10,10 +10,16 @@ export interface CandidateToken {
   logit: number;
 }
 
+export interface InputToken {
+  id: number;
+  text: string;
+}
+
 export interface TreeNode {
   id: string;
   parentId: string | null;
   prompt: string;
+  inputTokens: InputToken[] | null;
   candidates: CandidateToken[] | null;
   status: 'idle' | 'loading' | 'ready' | 'error';
   error: string | null;
@@ -28,6 +34,7 @@ export interface DistributionRequest {
 export interface DistributionResponse {
   type: 'distribution-response';
   nodeId: string;
+  inputTokens: InputToken[];
   candidates: CandidateToken[];
 }
 
