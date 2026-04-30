@@ -314,10 +314,18 @@ export function MeshCanvas() {
     };
   }, []);
 
-  const graphData: GraphData = useMemo(
-    () => buildGraphData(tipNodeId, storeNodes, sampling, positionsRef.current) ?? { nodes: [], links: [] },
-    [tipNodeId, storeNodes, sampling]
-  );
+  // Cache the last meaningful graph so clicks (which create a new tip with
+  // null candidates while inference is in flight) don't blank the canvas.
+  // The cache only updates when buildGraphData returns a populated graph.
+  const lastGoodGraphRef = useRef<GraphData>({ nodes: [], links: [] });
+  const graphData: GraphData = useMemo(() => {
+    const built = buildGraphData(tipNodeId, storeNodes, sampling, positionsRef.current);
+    if (built && built.nodes.length > 0) {
+      lastGoodGraphRef.current = built;
+      return built;
+    }
+    return lastGoodGraphRef.current;
+  }, [tipNodeId, storeNodes, sampling]);
 
   useEffect(() => {
     graphDataRef.current = graphData;

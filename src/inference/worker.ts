@@ -41,52 +41,65 @@ async function ensureModel(): Promise<void> {
   }
 }
 
-interface InferenceResult {
-  inputTokens: InputToken[];
-  candidates: CandidateToken[];
-}
-
-async function computeDistribution(prompt: string): Promise<InferenceResult> {
+// Stream the top-K back as progressively-larger batches. The model forward
+// pass dominates latency, but once it's done, decoding 50 BPE tokens is
+// noticeable (~30-100 ms). By posting top-3 first, then top-10, top-30, top-50,
+// the user sees the most probable candidates appear first and the tail fills
+// in shortly after — the mesh feels like it's growing instead of "popping" all
+// at once.
+async function streamDistribution(prompt: string, nodeId: string): Promise<void> {
   const tokenizer = await tokenizerPromise!;
   const model = await modelPromise!;
 
   // Trim trailing whitespace — GPT-2 BPE treats a trailing space as a separate
   // token, so "I'm going to " predicts "what starts a new word" (often
-  // single letters) instead of "what completes the phrase". Match the way
-  // user-facing inference UIs handle this by stripping trailing whitespace.
+  // single letters). Strip it for inference.
   const trimmed = prompt.replace(/\s+$/, '');
   const safePrompt = trimmed.length === 0 ? '\n' : trimmed;
-  // reason: tokenizer call return type is a polymorphic union in the library types; casting to any to avoid inference failure
+  // reason: tokenizer call return type is a polymorphic union in the library types
   const encoded = await (tokenizer as unknown as (text: string, opts: object) => Promise<{ input_ids: import('@huggingface/transformers').Tensor }>)(safePrompt, { return_tensors: 'pt' });
 
   const inputIdsTensor = encoded.input_ids;
-  // reason: input_ids tensor data is BigInt64Array on most paths; coerce to numbers for our InputToken[]
+  // reason: input_ids tensor data is BigInt64Array on most paths
   const inputIdsRaw = Array.from(inputIdsTensor.data as unknown as Iterable<number | bigint>).map((v) => Number(v));
   const inputTokens: InputToken[] = inputIdsRaw.map((id) => ({
     id,
     text: tokenizer.decode([id], { skip_special_tokens: false })
   }));
 
-  // reason: model forward pass return type is not narrowed; casting to any to access logits tensor
+  // reason: model forward pass return type is not narrowed
   const out = await (model as unknown as (inputs: unknown) => Promise<{ logits: import('@huggingface/transformers').Tensor }>)(encoded);
 
   const logits = out.logits;
   const lastIndex = logits.dims[1] - 1;
   const lastSlice = logits.slice(null, [lastIndex, lastIndex + 1], null);
-  // reason: DataArray is a union of typed arrays and any[]; cast to Float32Array for numeric indexing
   const flat = Array.from(lastSlice.data as Float32Array);
-
   const indexed = flat.map((logit, id) => ({ id, logit }));
   indexed.sort((a, b) => b.logit - a.logit);
   const top = indexed.slice(0, TOP_K);
 
-  const candidates: CandidateToken[] = top.map(({ id, logit }) => ({
-    id,
-    logit,
-    text: tokenizer.decode([id], { skip_special_tokens: false })
-  }));
-
-  return { inputTokens, candidates };
+  const checkpoints = [3, 10, 30, TOP_K];
+  let cpIndex = 0;
+  const candidates: CandidateToken[] = [];
+  for (let i = 0; i < TOP_K; i++) {
+    candidates.push({
+      id: top[i].id,
+      logit: top[i].logit,
+      text: tokenizer.decode([top[i].id], { skip_special_tokens: false })
+    });
+    if (cpIndex < checkpoints.length && i + 1 === checkpoints[cpIndex]) {
+      post({
+        type: 'distribution-response',
+        nodeId,
+        inputTokens,
+        candidates: candidates.slice()
+      });
+      cpIndex++;
+      // Yield to the event loop so postMessage can flush. The microtask break
+      // also lets the main thread run a render pass between batches.
+      await Promise.resolve();
+    }
+  }
 }
 
 self.addEventListener('message', async (ev: MessageEvent<WorkerInbound>) => {
@@ -94,8 +107,7 @@ self.addEventListener('message', async (ev: MessageEvent<WorkerInbound>) => {
   if (msg.type !== 'distribution-request') return;
   try {
     await ensureModel();
-    const { inputTokens, candidates } = await computeDistribution(msg.prompt);
-    post({ type: 'distribution-response', nodeId: msg.nodeId, inputTokens, candidates });
+    await streamDistribution(msg.prompt, msg.nodeId);
   } catch (err) {
     post({
       type: 'distribution-error',
