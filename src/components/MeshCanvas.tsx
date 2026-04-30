@@ -449,11 +449,11 @@ export function MeshCanvas() {
   if (tipNode.status === 'error') {
     return <FallbackOverlay message={`Inference error: ${tipNode.error}`} isError />;
   }
+  // Empty-prompt case is the only "fallback to text" we keep — nothing to render.
+  // For the in-flight first inference, we mount the empty canvas (stars + thinking
+  // pulse) and let nodes fade in when data arrives. No more screen flashing.
   if (!hasAnyData && tipNode.prompt === '') {
     return <FallbackOverlay message="Type a prompt below to see the mesh." />;
-  }
-  if (!hasAnyData) {
-    return <FallbackOverlay message="Computing distribution..." />;
   }
 
   return (
