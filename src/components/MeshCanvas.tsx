@@ -73,7 +73,7 @@ function buildScene(
     const decay = decayFor(distance);
     const radius = MIN_R + (MAX_R - MIN_R) * decay;
     return {
-      key: `chain-${i}`,
+      key: `chain-${i}-${tok.id}`,
       text: tok.text,
       position: [i * CHAIN_SPACING, 0, 0],
       radius,
@@ -156,7 +156,7 @@ function buildScene(
         : MIN_R + (MAX_R - MIN_R) * Math.sqrt(o.prob) * fadeFactor;
 
       fans.push({
-        key: `fan-${tn.id}-${o.originalIndex}`,
+        key: `fan-${tn.id}-${o.candidate.id}`,
         candidateIndex: o.originalIndex,
         candidate: o.candidate,
         prob: o.prob,
@@ -185,7 +185,7 @@ function buildScene(
           ? 0.55 * fadeFactor
           : 0.12 * fadeFactor;
       edges.push({
-        key: `fan-edge-${tn.id}-${o.originalIndex}`,
+        key: `fan-edge-${tn.id}-${o.candidate.id}`,
         from: fromCenter,
         to: position,
         opacity: baseOpacity,
@@ -529,6 +529,9 @@ function Scene() {
 
 export function MeshCanvas() {
   const tipNode = useStore((s) => s.nodes[s.tipNodeId]);
+  const isThinking =
+    !!tipNode && (tipNode.status === 'loading' || !tipNode.candidates);
+  const hasAnyData = !!tipNode?.candidates && !!tipNode?.inputTokens;
 
   if (!tipNode) {
     return (
@@ -546,7 +549,8 @@ export function MeshCanvas() {
     );
   }
 
-  if (tipNode.status === 'loading' && tipNode.prompt === '') {
+  // First-load state: nothing to render yet.
+  if (!hasAnyData && tipNode.prompt === '') {
     return (
       <div className="flex h-full items-center justify-center text-slate-500">
         Type a prompt below to see the mesh.
@@ -554,7 +558,7 @@ export function MeshCanvas() {
     );
   }
 
-  if (tipNode.status === 'loading' || !tipNode.candidates) {
+  if (!hasAnyData) {
     return (
       <div className="flex h-full items-center justify-center text-slate-500">
         Computing distribution...
@@ -575,7 +579,7 @@ export function MeshCanvas() {
 
   return (
     <div
-      className="h-full w-full"
+      className="relative h-full w-full"
       style={{
         background:
           'radial-gradient(ellipse at 60% 50%, #0b1438 0%, #060a1c 55%, #02030a 100%)'
@@ -601,6 +605,17 @@ export function MeshCanvas() {
           maxPolarAngle={Math.PI * 0.7}
         />
       </Canvas>
+      {isThinking && (
+        <div
+          className="pointer-events-none absolute right-4 top-4 flex items-center gap-2 rounded-full border border-blue-400/30 bg-blue-500/10 px-3 py-1 backdrop-blur-sm"
+          style={{ animation: 'pulse 1.4s ease-in-out infinite' }}
+        >
+          <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-blue-300" />
+          <span className="text-[10px] uppercase tracking-wider text-blue-200/80">
+            thinking
+          </span>
+        </div>
+      )}
     </div>
   );
 }

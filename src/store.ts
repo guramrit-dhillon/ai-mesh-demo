@@ -72,7 +72,18 @@ export const useStore = create<AppState>((set, get) => {
     modelError: null,
 
     setPrompt: (prompt) => {
-      const root = makeNode(ROOT_ID, null, prompt);
+      const existingRoot = get().nodes[ROOT_ID];
+      const root: TreeNode = {
+        id: ROOT_ID,
+        parentId: null,
+        prompt,
+        // Preserve last-known-good data so the canvas can render stale while new
+        // inference is in flight — prevents a full Scene unmount on every keystroke.
+        inputTokens: existingRoot?.inputTokens ?? null,
+        candidates: existingRoot?.candidates ?? null,
+        status: 'loading',
+        error: null
+      };
       set({
         prompt,
         nodes: { [ROOT_ID]: root },
