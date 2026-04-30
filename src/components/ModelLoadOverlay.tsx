@@ -13,7 +13,7 @@ export function ModelLoadOverlay() {
           <>
             <div className="mb-3 text-lg font-medium">Loading GPT-2...</div>
             <div className="text-sm text-slate-400">
-              First visit downloads ~122 MB of model weights. Cached after this.
+              First visit downloads ~268 MB of model weights. Cached after this.
             </div>
             <div className="mt-4 h-1 w-full overflow-hidden rounded-full bg-slate-800">
               <div className="h-full w-1/3 animate-pulse bg-blue-500" />

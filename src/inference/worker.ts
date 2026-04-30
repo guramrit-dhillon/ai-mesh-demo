@@ -25,7 +25,7 @@ async function ensureModel(): Promise<void> {
   try {
     tokenizerPromise = AutoTokenizer.from_pretrained(MODEL_ID);
     modelPromise = AutoModelForCausalLM.from_pretrained(MODEL_ID, {
-      dtype: 'q8'
+      dtype: 'int8'
     });
     await tokenizerPromise;
     await modelPromise;
