@@ -45,11 +45,11 @@ function layout(
     const x = depth * COLUMN_WIDTH + 80;
     const scored = score(node.candidates.map((c) => c.logit), sampling);
     const visibleCount = Math.min(node.candidates.length, 12);
-    const startY = -(visibleCount - 1) * NODE_VERTICAL_SPACING / 2;
+    const verticalOffset = (visibleCount - 1) * NODE_VERTICAL_SPACING / 2 + MAX_BUBBLE_R + 20;
     for (let i = 0; i < visibleCount; i++) {
       const candidate: CandidateToken = node.candidates[i];
       const s = scored[i];
-      const y = startY + i * NODE_VERTICAL_SPACING + 200 + depth * 0;
+      const y = (i - (visibleCount - 1) / 2) * NODE_VERTICAL_SPACING + verticalOffset;
       const r = MIN_BUBBLE_R + (MAX_BUBBLE_R - MIN_BUBBLE_R) * Math.sqrt(s.prob);
       bubbles.push({
         nodeId,
