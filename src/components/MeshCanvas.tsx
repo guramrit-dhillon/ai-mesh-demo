@@ -10,6 +10,7 @@ import type { CandidateToken, TreeNode } from '../types';
 
 const VISIBLE_PER_NODE = 24;
 const CHAIN_SPACING = 18;
+const MAX_VISIBLE_CHAIN = 6;
 
 interface GraphNode {
   id: string;
@@ -19,6 +20,7 @@ interface GraphNode {
   isTop: boolean;
   isActive: boolean;
   isChosen: boolean;
+  isTip: boolean;
   decay: number;
   prob: number;
   rank: number;
@@ -73,11 +75,18 @@ function buildGraphData(
   const links: GraphLink[] = [];
   const chainNodeIds: string[] = [];
 
-  inputTokens.forEach((tok, i) => {
+  // Keep only the most-recent MAX_VISIBLE_CHAIN tokens visible. The simulation
+  // anchors them in a fixed band near the tip; older context lives in the
+  // prompt textarea but stays out of the 3D scene so the camera frame doesn't
+  // have to keep expanding as the user types.
+  const visibleStart = Math.max(0, inputTokens.length - MAX_VISIBLE_CHAIN);
+  for (let i = visibleStart; i < inputTokens.length; i++) {
+    const tok = inputTokens[i];
     const distance = inputTokens.length - 1 - i;
     const decay = decayFor(distance);
     const id = `chain-${i}-${tok.id}`;
     chainNodeIds.push(id);
+    const isTip = i === inputTokens.length - 1;
     nodes.push({
       id,
       kind: 'chain',
@@ -86,16 +95,18 @@ function buildGraphData(
       isTop: false,
       isActive: false,
       isChosen: false,
+      isTip,
       decay,
       prob: 1,
       rank: i,
-      fx: i * CHAIN_SPACING,
+      // X position relative to the visible window so the tip is always near 0.
+      fx: (i - inputTokens.length + 1) * CHAIN_SPACING,
       fy: 0,
       fz: 0
     });
-    if (i > 0) {
+    if (chainNodeIds.length > 1) {
       links.push({
-        source: chainNodeIds[i - 1],
+        source: chainNodeIds[chainNodeIds.length - 2],
         target: id,
         alive: true,
         isChain: true,
@@ -104,7 +115,7 @@ function buildGraphData(
         intensity: 0.85 + 0.15 * decay
       });
     }
-  });
+  }
 
   treeChain.forEach((tn, treeIdx) => {
     if (!tn.candidates || !tn.inputTokens) return;
@@ -128,7 +139,10 @@ function buildGraphData(
         ? inputTokens[fanPositionIndex].text
         : null;
 
-    const anchorChainNodeId = chainNodeIds[Math.max(fanPositionIndex - 1, 0)];
+    // Map the absolute chain position into the visible chain window.
+    const visibleChainIndex = fanPositionIndex - 1 - visibleStart;
+    if (visibleChainIndex < 0) return; // Anchor is offscreen — skip its fan.
+    const anchorChainNodeId = chainNodeIds[Math.max(visibleChainIndex, 0)];
 
     ordered.forEach((o) => {
       const isTop = o.rank === 0;
@@ -148,6 +162,7 @@ function buildGraphData(
         isTop,
         isActive,
         isChosen,
+        isTip: false,
         decay: fadeFactor,
         prob: o.prob,
         rank: o.rank,
@@ -402,11 +417,21 @@ export function MeshCanvas() {
       | { zoomToFit: (ms?: number, padding?: number) => void }
       | null;
     if (!fg) return;
+    // Focus the camera only on the active region (tip + its candidates).
+    // Long chains no longer pull the frame back as the prompt grows.
+    type ZoomFitFn = (
+      ms?: number,
+      padding?: number,
+      filter?: (n: { isTip?: boolean; isActive?: boolean; kind?: string }) => boolean
+    ) => void;
+    const fitter = fg.zoomToFit as unknown as ZoomFitFn;
+    const activeOnly = (n: { isTip?: boolean; isActive?: boolean; kind?: string }) =>
+      !!n.isTip || (n.kind === 'candidate' && !!n.isActive);
     const t1 = window.setTimeout(() => {
-      try { fg.zoomToFit(800, 80); } catch { /* unmounted */ }
+      try { fitter(800, 100, activeOnly); } catch { /* unmounted */ }
     }, 1500);
     const t2 = window.setTimeout(() => {
-      try { fg.zoomToFit(600, 80); } catch { /* unmounted */ }
+      try { fitter(600, 100, activeOnly); } catch { /* unmounted */ }
     }, 3500);
     return () => {
       window.clearTimeout(t1);
@@ -448,30 +473,12 @@ export function MeshCanvas() {
         linkOpacity={1}
         linkWidth={(l) => {
           const link = l as unknown as GraphLink;
-          if (link.isChain) return 1.6;
-          if (link.isTopFan) return 1.2;
-          return 0.4 + 0.5 * link.intensity;
+          if (link.isTopFan) return 2.5;
+          if (link.isChain) return 2.0;
+          if (link.isActiveFan && link.alive) return 0.9 + 1.2 * link.intensity;
+          return 0.3 + 0.4 * link.intensity;
         }}
-        linkDirectionalParticles={(l) => {
-          const link = l as unknown as GraphLink;
-          if (link.isTopFan) return 5;
-          if (link.isActiveFan) return link.alive ? 2 : 0;
-          if (link.isChain) return 2;
-          return 0;
-        }}
-        linkDirectionalParticleWidth={(l) => {
-          const link = l as unknown as GraphLink;
-          if (link.isTopFan) return 2.4;
-          if (link.isActiveFan) return 1.4;
-          return 1.2;
-        }}
-        linkDirectionalParticleSpeed={(l) => {
-          const link = l as unknown as GraphLink;
-          if (link.isTopFan) return 0.014;
-          if (link.isActiveFan) return 0.008 + 0.006 * link.intensity;
-          return 0.005;
-        }}
-        linkDirectionalParticleColor={() => '#cfe2ff'}
+        linkDirectionalParticles={0}
         d3AlphaDecay={0.04}
         d3AlphaMin={0.005}
         d3VelocityDecay={0.45}
