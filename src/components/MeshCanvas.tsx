@@ -1,6 +1,7 @@
-import { Suspense, useMemo } from 'react';
-import { Canvas } from '@react-three/fiber';
-import { Html, Line, OrbitControls } from '@react-three/drei';
+import { Suspense, useMemo, useRef } from 'react';
+import { Canvas, useFrame } from '@react-three/fiber';
+import { Html, Line, OrbitControls, Stars } from '@react-three/drei';
+import * as THREE from 'three';
 import { useStore } from '../store';
 import { score } from '../sampling';
 import { renderToken } from '../tokens';
@@ -127,15 +128,26 @@ function buildScene(
 
       let position: [number, number, number];
       if (isActive && isTop) {
-        position = [fanCenterX + FAN_RADIUS * 0.7, 0, 0];
+        position = [fanCenterX + FAN_RADIUS * 1.0, 0, 0.2];
       } else if (!isActive && isChosen) {
         position = [fanPositionIndex * CHAIN_SPACING, 0, 0];
+      } else if (isActive) {
+        const r = o.rank;
+        const half = Math.ceil(r / 2);
+        const above = r % 2 === 1;
+        const yMag = Math.min(half * 0.55, 2.5);
+        const xPull = Math.max(0.15, 0.7 - half * 0.05);
+        const zJitter = (above ? 0.1 : -0.1) + ((r * 0.7) % 1 - 0.5) * 0.5;
+        position = [fanCenterX + xPull, above ? yMag : -yMag, zJitter];
       } else {
-        const angleStep = (2 * Math.PI) / Math.max(visible - (isActive ? 1 : 0), 1);
-        const angleIdx = isActive ? i - 1 : i;
-        const angle = angleIdx * angleStep + (isActive ? 0 : Math.PI / 6);
-        const r = isActive ? FAN_RADIUS : FAN_RADIUS * 0.7;
-        position = [fanCenterX, Math.cos(angle) * r, Math.sin(angle) * r];
+        const r = i;
+        const angle = r * (Math.PI * 2 * 0.32) + Math.PI / 5;
+        const ringR = FAN_RADIUS * 0.55;
+        position = [
+          fanCenterX,
+          Math.cos(angle) * ringR,
+          Math.sin(angle) * ringR - 0.4
+        ];
       }
 
       const radius = isTop && isActive
@@ -211,6 +223,71 @@ function Bubble({ position, radius, fillColor, emissive, emissiveIntensity, opac
   );
 }
 
+function FloorGrid({ length }: { length: number }) {
+  const positions = useMemo(() => {
+    const verts: number[] = [];
+    const span = Math.max(length * CHAIN_SPACING, 8);
+    const half = span / 2;
+    const step = 0.5;
+    for (let x = -2; x <= span + 2; x += step) {
+      verts.push(x, -1.6, -half, x, -1.6, half);
+    }
+    for (let z = -half; z <= half; z += step) {
+      verts.push(-2, -1.6, z, span + 2, -1.6, z);
+    }
+    return new Float32Array(verts);
+  }, [length]);
+
+  return (
+    <lineSegments>
+      <bufferGeometry>
+        <bufferAttribute
+          attach="attributes-position"
+          args={[positions, 3]}
+          count={positions.length / 3}
+          array={positions}
+          itemSize={3}
+        />
+      </bufferGeometry>
+      <lineBasicMaterial color="#1e3a8a" transparent opacity={0.15} />
+    </lineSegments>
+  );
+}
+
+function PulsingTopBubble({
+  position,
+  radius,
+  fillColor,
+  emissive
+}: {
+  position: [number, number, number];
+  radius: number;
+  fillColor: string;
+  emissive: string;
+}) {
+  const ref = useRef<THREE.Mesh>(null);
+  useFrame((state) => {
+    if (!ref.current) return;
+    const t = state.clock.getElapsedTime();
+    const pulse = 1 + Math.sin(t * 2.2) * 0.04;
+    ref.current.scale.set(pulse, pulse, pulse);
+  });
+  return (
+    <mesh ref={ref} position={position}>
+      <sphereGeometry args={[radius, 48, 48]} />
+      <meshStandardMaterial
+        color={fillColor}
+        emissive={emissive}
+        emissiveIntensity={1.8}
+        roughness={0.2}
+        metalness={0.15}
+        transparent
+        opacity={0.95}
+      />
+    </mesh>
+  );
+}
+
 function Scene() {
   const tipNodeId = useStore((s) => s.tipNodeId);
   const nodes = useStore((s) => s.nodes);
@@ -228,9 +305,13 @@ function Scene() {
 
   return (
     <>
-      <ambientLight intensity={0.45} />
-      <pointLight position={[tipPosition[0], 3, 4]} intensity={0.9} color="#a5c8ff" />
-      <pointLight position={[tipPosition[0] - 4, -2, 2]} intensity={0.4} color="#5b9dff" />
+      <ambientLight intensity={0.4} />
+      <pointLight position={[tipPosition[0], 3, 4]} intensity={1.2} color="#a5c8ff" distance={20} decay={1.5} />
+      <pointLight position={[tipPosition[0] - 4, -2, 3]} intensity={0.5} color="#5b9dff" distance={15} decay={2} />
+      <pointLight position={[tipPosition[0] + 4, 2, -3]} intensity={0.3} color="#7c3aed" distance={12} decay={2} />
+
+      <FloorGrid length={chain.length} />
+      <Stars radius={50} depth={30} count={1500} factor={2} fade speed={0.5} />
 
       {edges.map((e) => (
         <Line
@@ -308,19 +389,33 @@ function Scene() {
             }}
           >
             {f.isTop && f.isActive && (
-              <mesh>
-                <sphereGeometry args={[f.radius * 1.35, 32, 32]} />
-                <meshBasicMaterial color="#5b9dff" transparent opacity={0.12} />
-              </mesh>
+              <>
+                <mesh>
+                  <sphereGeometry args={[f.radius * 1.55, 32, 32]} />
+                  <meshBasicMaterial color="#7cb1ff" transparent opacity={0.08} />
+                </mesh>
+                <mesh>
+                  <sphereGeometry args={[f.radius * 1.25, 32, 32]} />
+                  <meshBasicMaterial color="#a5c8ff" transparent opacity={0.14} />
+                </mesh>
+                <PulsingTopBubble
+                  position={[0, 0, 0]}
+                  radius={f.radius}
+                  fillColor="#5b9dff"
+                  emissive="#a5c8ff"
+                />
+              </>
             )}
-            <Bubble
-              position={[0, 0, 0]}
-              radius={f.radius}
-              fillColor="#5b9dff"
-              emissive="#7cb1ff"
-              emissiveIntensity={emissiveBoost}
-              opacity={fillOpacity}
-            />
+            {!(f.isTop && f.isActive) && (
+              <Bubble
+                position={[0, 0, 0]}
+                radius={f.radius}
+                fillColor="#5b9dff"
+                emissive="#7cb1ff"
+                emissiveIntensity={emissiveBoost}
+                opacity={fillOpacity}
+              />
+            )}
             <Html center distanceFactor={8} style={{ pointerEvents: 'none' }}>
               <div
                 style={{
@@ -380,15 +475,32 @@ export function MeshCanvas() {
   }
 
   const tokensLength = tipNode.inputTokens?.length ?? 0;
+  const totalSpan = tokensLength * CHAIN_SPACING + FAN_RADIUS * 2;
   const cameraTarget: [number, number, number] = [
-    tokensLength * CHAIN_SPACING * 0.55,
-    0,
+    Math.max((tokensLength * CHAIN_SPACING + FAN_RADIUS) / 2, 1.5),
+    0.1,
     0
   ];
+  const fov = 42;
+  const fitDistance = totalSpan / (2 * Math.tan((fov * Math.PI) / 360)) + 1.5;
+  const cameraDistance = Math.max(fitDistance, 5);
 
   return (
-    <div className="h-full w-full" style={{ background: 'radial-gradient(ellipse at center, #0b1224 0%, #050810 80%)' }}>
-      <Canvas camera={{ position: [cameraTarget[0], 2.5, 7], fov: 45 }} dpr={[1, 2]}>
+    <div
+      className="h-full w-full"
+      style={{
+        background:
+          'radial-gradient(ellipse at 60% 50%, #0b1438 0%, #060a1c 55%, #02030a 100%)'
+      }}
+    >
+      <Canvas
+        camera={{
+          position: [cameraTarget[0] - 0.5, 1.8, cameraDistance],
+          fov
+        }}
+        dpr={[1, 2]}
+        gl={{ antialias: true }}
+      >
         <Suspense fallback={null}>
           <Scene />
         </Suspense>
@@ -398,6 +510,7 @@ export function MeshCanvas() {
           dampingFactor={0.08}
           minDistance={3}
           maxDistance={25}
+          maxPolarAngle={Math.PI * 0.7}
         />
       </Canvas>
     </div>
