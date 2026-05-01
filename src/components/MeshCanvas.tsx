@@ -609,18 +609,24 @@ export function MeshCanvas() {
 
   }, [graphData]);
 
-  // Compute the rotation pivot — midpoint between the leftmost visible chain
-  // bubble and a small offset to the right of the tip (where the active fan +
-  // lookahead live). Rotation around this point keeps the visible content
-  // pivoting in place rather than swinging around an off-center anchor.
-  const chainLen = tipNode?.inputTokens?.length ?? 0;
-  const visibleChain = Math.min(chainLen, MAX_VISIBLE_CHAIN);
-  // Chain spans x = (1 - visibleChain) * CHAIN_SPACING ... 0; fan extends to the right of 0
-  // We bias slightly right of geometric center so the camera looks at the active region.
-  const pivotX = visibleChain > 0
-    ? ((1 - visibleChain) * CHAIN_SPACING) / 2 + 6
-    : 0;
+  // Compute the centroid of every currently-rendered node and use it as the
+  // OrbitControls target so rotation pivots around the actual visible mesh,
+  // not just the chain midpoint.
+  const computeCentroid = (): [number, number, number] => {
+    const positions = positionsRef.current;
+    let sumX = 0, sumY = 0, sumZ = 0, count = 0;
+    // Restrict to currently-rendered ids so stale positions don't drag the
+    // centroid sideways.
+    const liveIds = new Set(graphData.nodes.map((n) => n.id));
+    for (const [id, p] of positions) {
+      if (!liveIds.has(id)) continue;
+      sumX += p.x; sumY += p.y; sumZ += p.z; count++;
+    }
+    if (count === 0) return [0, 0, 0];
+    return [sumX / count, sumY / count, sumZ / count];
+  };
 
+  const chainLen = tipNode?.inputTokens?.length ?? 0;
   const tipSignature = `${tipNodeId}:${chainLen}`;
   useEffect(() => {
     const fg = fgRef.current as
@@ -632,14 +638,20 @@ export function MeshCanvas() {
         }
       | null;
     if (!fg) return;
-    try {
-      const ctl = fg.controls();
-      if (ctl?.target) {
-        ctl.target.set(pivotX, 0, 0);
-        if (typeof ctl.update === 'function') ctl.update();
-      }
-    } catch { /* unmounted or no controls yet */ }
-  }, [tipSignature, pivotX]);
+    // Wait a bit so the simulation has positioned the new nodes before we
+    // measure the centroid.
+    const t = window.setTimeout(() => {
+      try {
+        const [cx, cy, cz] = computeCentroid();
+        const ctl = fg.controls();
+        if (ctl?.target) {
+          ctl.target.set(cx, cy, cz);
+          if (typeof ctl.update === 'function') ctl.update();
+        }
+      } catch { /* */ }
+    }, 800);
+    return () => window.clearTimeout(t);
+  }, [tipSignature]);
 
   // Auto-fit ONCE when the graph first becomes populated. After that, the
   // camera stays put across keystrokes / clicks / slider drags so the view
@@ -795,9 +807,10 @@ export function MeshCanvas() {
               | null;
             if (!fg) return;
             try {
+              const [cx, cy, cz] = computeCentroid();
               const ctl = fg.controls();
               if (ctl?.target) {
-                ctl.target.set(pivotX, 0, 0);
+                ctl.target.set(cx, cy, cz);
                 if (typeof ctl.update === 'function') ctl.update();
               }
             } catch { /* */ }
