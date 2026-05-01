@@ -358,14 +358,6 @@ function linkColor(link: GraphLink): string {
   return `rgba(100, 200, 230, ${0.18 * i + 0.05})`;
 }
 
-// Tag a sprite/group so the global fade-in loop will scale it up from 0 to 1
-// over ~500 ms with cubic ease-out. Without this, each newly-streamed
-// candidate or lookahead node "pops" into the scene.
-function tagFadeIn(obj: THREE.Object3D) {
-  obj.scale.setScalar(0.001);
-  obj.userData.__fadeStart = performance.now();
-}
-
 function makeSprite(node: GraphNode): THREE.Object3D {
   const sprite = new SpriteText(renderToken(node.text));
   const color = tokenColor(node);
@@ -401,11 +393,9 @@ function makeSprite(node: GraphNode): THREE.Object3D {
     const group = new THREE.Group();
     group.add(halo);
     group.add(sprite);
-    tagFadeIn(group);
     return group;
   }
 
-  tagFadeIn(sprite);
   return sprite;
 }
 
@@ -477,35 +467,6 @@ export function MeshCanvas() {
       try { fg.refresh(); } catch { /* */ }
     }
   }, [graphData]);
-
-  // Drive fade-in animation: traverse the THREE scene and ease tagged objects
-  // from scale 0 → 1 over 500 ms. Each sprite/group is tagged on creation in
-  // makeSprite and untagged once it reaches full size.
-  useEffect(() => {
-    let raf = 0;
-    const FADE_MS = 500;
-    const animate = () => {
-      raf = requestAnimationFrame(animate);
-      const fg = fgRef.current as { scene?: () => THREE.Scene } | null;
-      if (!fg?.scene) return;
-      let scene: THREE.Scene;
-      try { scene = fg.scene(); } catch { return; }
-      const now = performance.now();
-      scene.traverse((obj) => {
-        const ud = obj.userData as { __fadeStart?: number };
-        if (ud.__fadeStart === undefined) return;
-        const age = now - ud.__fadeStart;
-        if (age < 0) return;
-        const t = Math.min(age / FADE_MS, 1);
-        // Cubic ease-out
-        const eased = 1 - Math.pow(1 - t, 3);
-        obj.scale.setScalar(eased);
-        if (t >= 1) delete ud.__fadeStart;
-      });
-    };
-    raf = requestAnimationFrame(animate);
-    return () => cancelAnimationFrame(raf);
-  }, []);
 
   useEffect(() => {
     const fg = fgRef.current as
