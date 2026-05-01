@@ -90,8 +90,10 @@ export function EmbeddingsCanvas() {
     if (fg.postProcessingComposer) {
       try {
         const composer = fg.postProcessingComposer();
+        // Lighter bloom for embeddings — many sprites packed into a cube,
+        // so heavy bloom would just merge them into a white blob.
         composer.addPass(
-          new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 1.2, 0.85, 0.1)
+          new UnrealBloomPass(new THREE.Vector2(window.innerWidth, window.innerHeight), 0.45, 0.6, 0.55)
         );
       } catch {
         /* */
@@ -158,8 +160,8 @@ export function EmbeddingsCanvas() {
           const sprite = new SpriteText(n.text);
           sprite.color = n.color;
           sprite.fontFace = 'ui-monospace, monospace';
-          sprite.fontWeight = '600';
-          sprite.textHeight = 4.5;
+          sprite.fontWeight = '500';
+          sprite.textHeight = 3.5;
           sprite.material.depthWrite = false;
           sprite.material.transparent = true;
           sprite.padding = 1;

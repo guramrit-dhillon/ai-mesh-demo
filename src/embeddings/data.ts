@@ -19,12 +19,14 @@ interface Category {
   words: string[];
 }
 
+// Positions are spread across ~±100 units so the ~200 sprites don't overlap.
+// Colors are darker (300-level Tailwind tones) so bloom doesn't wash them out.
 const CATEGORIES: Category[] = [
   {
     name: 'animals',
-    color: '#fca5a5',
-    center: [-40, 18, 12],
-    radius: 9,
+    color: '#f87171',
+    center: [-80, 36, 24],
+    radius: 18,
     words: [
       'cat', 'dog', 'horse', 'cow', 'sheep', 'goat', 'pig', 'wolf',
       'fox', 'bear', 'tiger', 'lion', 'mouse', 'rabbit', 'deer', 'bird',
@@ -33,9 +35,9 @@ const CATEGORIES: Category[] = [
   },
   {
     name: 'colors',
-    color: '#fde68a',
-    center: [38, 22, -8],
-    radius: 7,
+    color: '#facc15',
+    center: [76, 44, -16],
+    radius: 14,
     words: [
       'red', 'orange', 'yellow', 'green', 'blue', 'purple', 'pink',
       'black', 'white', 'gray', 'brown', 'cyan', 'magenta', 'crimson',
@@ -44,9 +46,9 @@ const CATEGORIES: Category[] = [
   },
   {
     name: 'emotions',
-    color: '#f9a8d4',
-    center: [-20, -30, 20],
-    radius: 10,
+    color: '#ec4899',
+    center: [-40, -60, 40],
+    radius: 20,
     words: [
       'happy', 'sad', 'angry', 'afraid', 'love', 'hate', 'joy', 'fear',
       'surprise', 'disgust', 'calm', 'excited', 'anxious', 'proud',
@@ -55,9 +57,9 @@ const CATEGORIES: Category[] = [
   },
   {
     name: 'foods',
-    color: '#fdba74',
-    center: [22, -28, 16],
-    radius: 9,
+    color: '#fb923c',
+    center: [44, -56, 32],
+    radius: 18,
     words: [
       'apple', 'banana', 'bread', 'cheese', 'rice', 'pasta', 'pizza',
       'sandwich', 'soup', 'salad', 'meat', 'chicken', 'beef', 'fish',
@@ -67,9 +69,9 @@ const CATEGORIES: Category[] = [
   },
   {
     name: 'places',
-    color: '#86efac',
-    center: [10, 35, -22],
-    radius: 12,
+    color: '#22c55e',
+    center: [20, 70, -44],
+    radius: 24,
     words: [
       'city', 'country', 'forest', 'mountain', 'river', 'ocean', 'lake',
       'desert', 'beach', 'island', 'park', 'garden', 'building', 'house',
@@ -79,9 +81,9 @@ const CATEGORIES: Category[] = [
   },
   {
     name: 'numbers',
-    color: '#a5b4fc',
-    center: [-38, -8, -18],
-    radius: 7,
+    color: '#6366f1',
+    center: [-76, -16, -36],
+    radius: 14,
     words: [
       'one', 'two', 'three', 'four', 'five', 'six', 'seven', 'eight',
       'nine', 'ten', 'hundred', 'thousand', 'million', 'billion',
@@ -90,9 +92,9 @@ const CATEGORIES: Category[] = [
   },
   {
     name: 'time',
-    color: '#67e8f9',
-    center: [44, -2, 18],
-    radius: 8,
+    color: '#06b6d4',
+    center: [88, -4, 36],
+    radius: 16,
     words: [
       'second', 'minute', 'hour', 'day', 'week', 'month', 'year',
       'decade', 'century', 'morning', 'noon', 'evening', 'night',
@@ -101,9 +103,9 @@ const CATEGORIES: Category[] = [
   },
   {
     name: 'tech',
-    color: '#7dd3fc',
-    center: [4, 8, 38],
-    radius: 9,
+    color: '#0ea5e9',
+    center: [8, 16, 76],
+    radius: 18,
     words: [
       'computer', 'phone', 'tablet', 'laptop', 'screen', 'keyboard',
       'mouse', 'internet', 'website', 'email', 'app', 'software',
@@ -113,9 +115,9 @@ const CATEGORIES: Category[] = [
   },
   {
     name: 'verbs-motion',
-    color: '#c4b5fd',
-    center: [-8, 4, -38],
-    radius: 8,
+    color: '#a855f7',
+    center: [-16, 8, -76],
+    radius: 16,
     words: [
       'run', 'walk', 'jump', 'fly', 'swim', 'climb', 'fall', 'rise',
       'move', 'travel', 'arrive', 'leave', 'enter', 'exit', 'follow',
@@ -124,9 +126,9 @@ const CATEGORIES: Category[] = [
   },
   {
     name: 'family',
-    color: '#fbcfe8',
-    center: [30, 6, 30],
-    radius: 7,
+    color: '#f472b6',
+    center: [60, 12, 60],
+    radius: 14,
     words: [
       'mother', 'father', 'sister', 'brother', 'son', 'daughter',
       'aunt', 'uncle', 'cousin', 'grandmother', 'grandfather', 'parent',
@@ -135,9 +137,9 @@ const CATEGORIES: Category[] = [
   },
   {
     name: 'body',
-    color: '#fef08a',
-    center: [-30, 28, -30],
-    radius: 8,
+    color: '#eab308',
+    center: [-60, 56, -60],
+    radius: 16,
     words: [
       'head', 'eye', 'ear', 'nose', 'mouth', 'tooth', 'tongue', 'hair',
       'arm', 'hand', 'finger', 'leg', 'foot', 'toe', 'heart', 'brain',
@@ -146,9 +148,9 @@ const CATEGORIES: Category[] = [
   },
   {
     name: 'weather',
-    color: '#bae6fd',
-    center: [16, -36, -18],
-    radius: 8,
+    color: '#38bdf8',
+    center: [32, -72, -36],
+    radius: 16,
     words: [
       'sun', 'moon', 'star', 'cloud', 'rain', 'snow', 'wind', 'storm',
       'fog', 'ice', 'hot', 'cold', 'warm', 'cool', 'thunder', 'lightning',
