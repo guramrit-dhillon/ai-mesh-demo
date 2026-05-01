@@ -78,7 +78,11 @@ async function streamDistribution(prompt: string, nodeId: string): Promise<void>
   indexed.sort((a, b) => b.logit - a.logit);
   const top = indexed.slice(0, TOP_K);
 
-  const checkpoints = [3, 10, 30, TOP_K];
+  // Eight checkpoints with growing batch sizes — and a real setTimeout-based
+  // delay between each — so the candidates trickle in instead of arriving
+  // simultaneously. Total reveal time ≈ 480 ms after the forward pass.
+  const checkpoints = [3, 6, 10, 15, 22, 30, 40, TOP_K];
+  const STEP_DELAY_MS = 70;
   let cpIndex = 0;
   const candidates: CandidateToken[] = [];
   for (let i = 0; i < TOP_K; i++) {
@@ -95,9 +99,11 @@ async function streamDistribution(prompt: string, nodeId: string): Promise<void>
         candidates: candidates.slice()
       });
       cpIndex++;
-      // Yield to the event loop so postMessage can flush. The microtask break
-      // also lets the main thread run a render pass between batches.
-      await Promise.resolve();
+      // Real wall-clock delay between batches — the user perceives candidates
+      // appearing in a sequence instead of a single dump.
+      if (cpIndex < checkpoints.length) {
+        await new Promise((r) => setTimeout(r, STEP_DELAY_MS));
+      }
     }
   }
 }
