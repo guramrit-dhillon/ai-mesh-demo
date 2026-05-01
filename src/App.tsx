@@ -1,5 +1,6 @@
 import { Controls } from './components/Controls';
 import { EmbeddingsCanvas } from './components/EmbeddingsCanvas';
+import { EmbeddingsControls } from './components/EmbeddingsControls';
 import { MathPanel } from './components/MathPanel';
 import { MeshCanvas } from './components/MeshCanvas';
 import { ModeSwitcher } from './components/ModeSwitcher';
@@ -36,15 +37,18 @@ export default function App() {
           </>
         )}
         {mode === 'embeddings' && (
-          <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-300">
-            <div className="mb-2 text-[10px] uppercase tracking-wider text-cyan-300">embedding space</div>
-            <p className="leading-relaxed text-slate-400">
-              Each token is a point in semantic 3D space. Tokens with similar meanings cluster together — animals near other animals, colors near colors, emotions near emotions.
-            </p>
-            <p className="mt-3 text-[10px] text-slate-500">
-              Showing curated semantic clusters. To swap in real GPT-2 token embeddings, see <code className="text-cyan-300">scripts/extract_embeddings.py</code>.
-            </p>
-          </div>
+          <>
+            <EmbeddingsControls />
+            <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-300">
+              <div className="mb-2 text-[10px] uppercase tracking-wider text-cyan-300">embedding space</div>
+              <p className="leading-relaxed text-slate-400">
+                Each token is a point in semantic 3D space. Tokens with similar meanings cluster together — animals near other animals, colors near colors, emotions near emotions.
+              </p>
+              <p className="mt-3 text-[10px] text-slate-500">
+                Showing curated semantic clusters. Drag <em>spread</em> to pull clusters apart and read individual labels. To swap in real GPT-2 token embeddings, see <code className="text-cyan-300">scripts/extract_embeddings.py</code>.
+              </p>
+            </div>
+          </>
         )}
       </div>
       <div className="col-span-2 row-span-1">

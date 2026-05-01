@@ -45,6 +45,8 @@ interface AppState {
   modelStatus: ModelStatus['status'];
   modelError: string | null;
   mode: VizMode;
+  embeddingSpread: number;
+  embeddingTextSize: number;
 
   setPrompt: (prompt: string) => void;
   setSampling: (next: Partial<SamplingParams>) => void;
@@ -52,6 +54,8 @@ interface AppState {
   expand: (parentNodeId: string, candidate: CandidateToken) => void;
   setTip: (nodeId: string) => void;
   setMode: (mode: VizMode) => void;
+  setEmbeddingSpread: (v: number) => void;
+  setEmbeddingTextSize: (v: number) => void;
 }
 
 const ROOT_ID = 'root';
@@ -130,6 +134,8 @@ export const useStore = create<AppState>((set, get) => {
     modelStatus: 'loading',
     modelError: null,
     mode: 'predictions',
+    embeddingSpread: 1.0,
+    embeddingTextSize: 3.5,
 
     setPrompt: (prompt) => {
       const existingRoot = get().nodes[ROOT_ID];
@@ -200,6 +206,8 @@ export const useStore = create<AppState>((set, get) => {
       if (get().nodes[nodeId]) set({ tipNodeId: nodeId });
     },
 
-    setMode: (mode) => set({ mode })
+    setMode: (mode) => set({ mode }),
+    setEmbeddingSpread: (v) => set({ embeddingSpread: v }),
+    setEmbeddingTextSize: (v) => set({ embeddingTextSize: v })
   };
 });

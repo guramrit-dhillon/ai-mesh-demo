@@ -4,6 +4,7 @@ import SpriteText from 'three-spritetext';
 import * as THREE from 'three';
 import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPass.js';
 import { buildEmbeddingPoints, categoryColor } from '../embeddings/data';
+import { useStore } from '../store';
 
 interface ScatterNode {
   id: string;
@@ -19,6 +20,8 @@ export function EmbeddingsCanvas() {
   const containerRef = useRef<HTMLDivElement>(null);
   const fgRef = useRef<unknown>(null);
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
+  const spread = useStore((s) => s.embeddingSpread);
+  const textSize = useStore((s) => s.embeddingTextSize);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -44,14 +47,14 @@ export function EmbeddingsCanvas() {
       text: p.text,
       category: p.category,
       color: categoryColor(p.category),
-      // Pin every node so positions match PCA coords exactly. The simulation
-      // doesn't disturb them.
-      fx: p.x,
-      fy: p.y,
-      fz: p.z
+      // Spread multiplier scales all positions outward — at higher values the
+      // clusters separate more, individual labels become more readable.
+      fx: p.x * spread,
+      fy: p.y * spread,
+      fz: p.z * spread
     }));
     return { nodes, links: [] };
-  }, []);
+  }, [spread]);
 
   // One-time: stars, grid floor, bloom — same holographic vocabulary as the
   // predictions mode so the two views feel like the same product.
@@ -161,7 +164,7 @@ export function EmbeddingsCanvas() {
           sprite.color = n.color;
           sprite.fontFace = 'ui-monospace, monospace';
           sprite.fontWeight = '500';
-          sprite.textHeight = 3.5;
+          sprite.textHeight = textSize;
           sprite.material.depthWrite = false;
           sprite.material.transparent = true;
           sprite.padding = 1;
