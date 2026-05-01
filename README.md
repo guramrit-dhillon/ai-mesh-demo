@@ -2,7 +2,11 @@
 
 > A live look inside language models — running entirely in your browser.
 
+**Live demo:** https://guramrit-dhillon.github.io/ai-mesh-demo/
+
 MESH renders the internals of GPT-2 as four interactive 3D scenes. Type a prompt and watch the next-token distribution, the embedding space, the input tokens that drove the prediction, and the model's per-position confidence — all powered by the public Xenova/gpt2 ONNX bundle, no server round-trips.
+
+> First visit downloads ~268 MB of model weights from the Hugging Face CDN into your browser cache. Subsequent loads are instant.
 
 ## Lenses
 
@@ -20,7 +24,16 @@ npm install
 npm run dev
 ```
 
-First load downloads ~268 MB of model weights into your browser cache. Subsequent loads are instant.
+Open [http://localhost:5173](http://localhost:5173). For a production preview:
+
+```bash
+npm run build
+npm run preview
+```
+
+## Settings
+
+A drawer (gear icon, bottom-left rail) lets you swap the **accent color** (cyan / violet / emerald / amber — retints all four lenses live) and toggle **performance mode** (low skips bloom + trims the starfield). Settings persist to `localStorage`.
 
 ## Stack
 
@@ -53,10 +66,11 @@ npm test          # vitest
 ```
 src/
 ├── App.tsx                       — shell: left rail + top bar + stage + sidebar + prompt
-├── store.ts                      — Zustand: prompt tree, modes, controls, autoplay
+├── store.ts                      — Zustand: prompt tree, modes, controls, autoplay, settings
 ├── inference/                    — worker + client (streaming + raw single-shot APIs)
 ├── sampling.ts                   — softmax / top-k / top-p
 ├── tokens.ts                     — BPE token rendering
+├── theme/accent.ts               — accent palette, shade()/rgba() helpers, useAccentRGB hook
 ├── attention/                    — ablation-based attribution
 ├── logitLens/                    — progressive prefix predictions
 ├── embeddings/                   — synthetic data + real MiniLM + PCA
@@ -66,10 +80,16 @@ src/
 │   ├── MeshCanvas.tsx            — predictions stage
 │   ├── EmbeddingsCanvas.tsx      — embeddings stage
 │   ├── AttentionCanvas.tsx       — attention stage
-│   └── LogitLensCanvas.tsx       — logit-lens stage
+│   ├── LogitLensCanvas.tsx       — logit-lens stage
+│   ├── *Controls.tsx             — sidebar panels per lens
+│   └── PromptInput.tsx           — debounced prompt textarea + suggestion chips
 ├── hooks/useAutoplay.ts          — top-1 walker
 └── styles/index.css              — MESH design tokens, mesh-panel/btn/range/divider
 ```
+
+## Deploy
+
+This repo deploys automatically to GitHub Pages on every push to `master` via `.github/workflows/deploy.yml`. The Vite `base` switches to `/ai-mesh-demo/` for production builds; dev keeps `/`.
 
 ## Why "MESH"?
 
