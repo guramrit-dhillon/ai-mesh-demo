@@ -32,6 +32,8 @@ function depthFromTip(
   return -1;
 }
 
+export type VizMode = 'predictions' | 'embeddings' | 'attention' | 'logit-lens';
+
 interface AppState {
   prompt: string;
   rootNodeId: string;
@@ -42,12 +44,14 @@ interface AppState {
   sampling: SamplingParams;
   modelStatus: ModelStatus['status'];
   modelError: string | null;
+  mode: VizMode;
 
   setPrompt: (prompt: string) => void;
   setSampling: (next: Partial<SamplingParams>) => void;
   setHover: (nodeId: string | null, candidateIndex: number | null) => void;
   expand: (parentNodeId: string, candidate: CandidateToken) => void;
   setTip: (nodeId: string) => void;
+  setMode: (mode: VizMode) => void;
 }
 
 const ROOT_ID = 'root';
@@ -125,6 +129,7 @@ export const useStore = create<AppState>((set, get) => {
     sampling: { temperature: 1.0, topK: 10, topP: 0.95 },
     modelStatus: 'loading',
     modelError: null,
+    mode: 'predictions',
 
     setPrompt: (prompt) => {
       const existingRoot = get().nodes[ROOT_ID];
@@ -193,6 +198,8 @@ export const useStore = create<AppState>((set, get) => {
 
     setTip: (nodeId) => {
       if (get().nodes[nodeId]) set({ tipNodeId: nodeId });
-    }
+    },
+
+    setMode: (mode) => set({ mode })
   };
 });
