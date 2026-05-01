@@ -8,6 +8,17 @@ MESH renders the internals of GPT-2 as four interactive 3D scenes. Type a prompt
 
 > First visit downloads ~268 MB of model weights from the Hugging Face CDN into your browser cache. Subsequent loads are instant.
 
+<table>
+  <tr>
+    <td width="50%"><a href="docs/screenshots/predictions.png"><img src="docs/screenshots/predictions.png" alt="Predictions lens — next-token mesh fanning out from the prompt 'I'm going to'" /></a></td>
+    <td width="50%"><a href="docs/screenshots/embeddings.png"><img src="docs/screenshots/embeddings.png" alt="Embeddings lens — color-coded clusters of tokens in 3D semantic space" /></a></td>
+  </tr>
+  <tr>
+    <td width="50%"><a href="docs/screenshots/attention.png"><img src="docs/screenshots/attention.png" alt="Attention lens — bars per input token showing which ones drove the prediction" /></a></td>
+    <td width="50%"><a href="docs/screenshots/logit-lens.png"><img src="docs/screenshots/logit-lens.png" alt="Logit Lens — progressive prefix predictions with surprise rings and trajectory chart" /></a></td>
+  </tr>
+</table>
+
 ## Lenses
 
 | Lens | What it shows |
