@@ -146,6 +146,9 @@ function buildGraphData(
     ordered.forEach((o) => {
       const isTop = o.rank === 0;
       const isChosen = chosenText !== null && o.candidate.text === chosenText;
+      // The chosen candidate is already represented as a chain bubble — hide
+      // its duplicate in the historical fan so the user can't re-click it.
+      if (!isActive && isChosen) return;
       // Identity by *text* (not numeric token id) so candidates that recur
       // across consecutive inferences keep their physics position. As the
       // user types, "going" stays put even though the underlying token id
