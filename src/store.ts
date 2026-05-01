@@ -47,6 +47,10 @@ interface AppState {
   mode: VizMode;
   embeddingSpread: number;
   embeddingTextSize: number;
+  // Real embeddings — populated when the user clicks "Load real" in
+  // EmbeddingsControls; until then the synthetic dataset is used.
+  realEmbeddings: { text: string; category: string; x: number; y: number; z: number }[] | null;
+  realEmbeddingProgress: { step: string; ratio: number } | null;
 
   setPrompt: (prompt: string) => void;
   setSampling: (next: Partial<SamplingParams>) => void;
@@ -56,6 +60,8 @@ interface AppState {
   setMode: (mode: VizMode) => void;
   setEmbeddingSpread: (v: number) => void;
   setEmbeddingTextSize: (v: number) => void;
+  setRealEmbeddings: (pts: AppState['realEmbeddings']) => void;
+  setRealEmbeddingProgress: (p: AppState['realEmbeddingProgress']) => void;
 }
 
 const ROOT_ID = 'root';
@@ -136,6 +142,8 @@ export const useStore = create<AppState>((set, get) => {
     mode: 'predictions',
     embeddingSpread: 1.0,
     embeddingTextSize: 3.5,
+    realEmbeddings: null,
+    realEmbeddingProgress: null,
 
     setPrompt: (prompt) => {
       const existingRoot = get().nodes[ROOT_ID];
@@ -208,6 +216,8 @@ export const useStore = create<AppState>((set, get) => {
 
     setMode: (mode) => set({ mode }),
     setEmbeddingSpread: (v) => set({ embeddingSpread: v }),
-    setEmbeddingTextSize: (v) => set({ embeddingTextSize: v })
+    setEmbeddingTextSize: (v) => set({ embeddingTextSize: v }),
+    setRealEmbeddings: (pts) => set({ realEmbeddings: pts }),
+    setRealEmbeddingProgress: (p) => set({ realEmbeddingProgress: p })
   };
 });

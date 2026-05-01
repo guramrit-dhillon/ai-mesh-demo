@@ -22,6 +22,7 @@ export function EmbeddingsCanvas() {
   const [size, setSize] = useState<{ width: number; height: number } | null>(null);
   const spread = useStore((s) => s.embeddingSpread);
   const textSize = useStore((s) => s.embeddingTextSize);
+  const realEmbeddings = useStore((s) => s.realEmbeddings);
 
   useEffect(() => {
     const el = containerRef.current;
@@ -41,20 +42,20 @@ export function EmbeddingsCanvas() {
   }, []);
 
   const graphData = useMemo(() => {
-    const points = buildEmbeddingPoints();
+    // Prefer real embeddings (computed in-browser via MiniLM) when loaded;
+    // otherwise fall back to the synthetic clustered dataset.
+    const points = realEmbeddings ?? buildEmbeddingPoints();
     const nodes: ScatterNode[] = points.map((p) => ({
       id: `${p.category}/${p.text}`,
       text: p.text,
       category: p.category,
       color: categoryColor(p.category),
-      // Spread multiplier scales all positions outward — at higher values the
-      // clusters separate more, individual labels become more readable.
       fx: p.x * spread,
       fy: p.y * spread,
       fz: p.z * spread
     }));
     return { nodes, links: [] };
-  }, [spread]);
+  }, [spread, realEmbeddings]);
 
   // One-time: stars, grid floor, bloom — same holographic vocabulary as the
   // predictions mode so the two views feel like the same product.
