@@ -312,12 +312,12 @@ function tokenColor(node: GraphNode): string {
   }
   if (node.kind === 'lookahead') {
     if (node.isTop) {
-      const t = node.decay;
-      // Lookahead top-1: aqua-mint, distinct from active top-1 (white-cyan)
-      return `rgb(${Math.round(150 * t + 70)}, ${Math.round(255 * t)}, ${Math.round(220 * t + 35)})`;
+      // Lookahead top-1: bright aqua-mint, easy to spot at any depth
+      return `rgb(140, 255, 230)`;
     }
-    const t = node.decay * (0.5 + 0.5 * node.prob);
-    return `rgb(${Math.round(120 * t + 50)}, ${Math.round(200 * t + 50)}, ${Math.round(220 * t + 35)})`;
+    // Non-top lookahead: keep visibility floor so deep levels are still legible
+    const t = Math.max(0.55, node.decay * (0.6 + 0.4 * node.prob));
+    return `rgb(${Math.round(110 * t + 80)}, ${Math.round(200 * t + 55)}, ${Math.round(225 * t + 30)})`;
   }
   if (node.isTop && node.isActive) return '#e8fbff';
   if (node.isActive) {
@@ -332,8 +332,9 @@ function tokenColor(node: GraphNode): string {
 function tokenSize(node: GraphNode): number {
   if (node.kind === 'chain') return 3.5 + 4.5 * node.decay;
   if (node.kind === 'lookahead') {
-    if (node.isTop) return (5 + 4 * node.prob) * node.decay + 1;
-    return (3 + 2.5 * node.prob) * node.decay + 1;
+    // Floor sizes so deep-lookahead candidates remain readable.
+    if (node.isTop) return Math.max(5.5, (6 + 4 * node.prob) * node.decay + 2);
+    return Math.max(3.5, (3.5 + 2.5 * node.prob) * node.decay + 1.5);
   }
   if (node.isTop && node.isActive) return 11;
   if (node.isActive) return 4 + 7 * Math.sqrt(node.prob);
@@ -458,6 +459,13 @@ export function MeshCanvas() {
 
   useEffect(() => {
     graphDataRef.current = graphData;
+    // Nudge force-graph to ingest the new node set immediately. Without this
+    // the library can sit on partial data when nodes arrive in waves
+    // (incremental top-K, or a lookahead inference returning later).
+    const fg = fgRef.current as { refresh?: () => void } | null;
+    if (fg && typeof fg.refresh === 'function') {
+      try { fg.refresh(); } catch { /* */ }
+    }
   }, [graphData]);
 
   useEffect(() => {
