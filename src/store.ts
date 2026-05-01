@@ -34,6 +34,39 @@ function depthFromTip(
 
 export type VizMode = 'predictions' | 'embeddings' | 'attention' | 'logit-lens';
 
+// Per-input-token attribution score: how much the baseline top-1 prediction
+// drops when this token is removed. Higher = the model relied more on it.
+export interface AttentionToken {
+  text: string;
+  attribution: number; // 0..1 (raw drop, clamped)
+}
+
+export interface AttentionResult {
+  prompt: string;
+  inputTokens: AttentionToken[];
+  baselineTopText: string;
+  baselineTopProb: number;
+  // Top-5 alternative targets from the baseline pass — the UI uses these as
+  // "what if I asked attribution against this token instead?" buttons.
+  topCandidates: { id: number; text: string; prob: number }[];
+}
+
+// Logit-lens-style: at each prefix length k, what does the model predict
+// the next token to be? `actual` is the real next token in the prompt;
+// `predicted` is the top-1; matching them = the model would have generated
+// this exact prompt.
+export interface LogitLensStep {
+  prefixText: string;       // full prefix decoded
+  contextTail: string;      // last ~20 chars for the chain label
+  actualNext: string | null; // the real next token (null at the final step)
+  topPredictions: { text: string; prob: number }[];
+}
+
+export interface LogitLensResult {
+  prompt: string;
+  steps: LogitLensStep[];
+}
+
 interface AppState {
   prompt: string;
   rootNodeId: string;
@@ -51,6 +84,25 @@ interface AppState {
   // EmbeddingsControls; until then the synthetic dataset is used.
   realEmbeddings: { text: string; category: string; x: number; y: number; z: number }[] | null;
   realEmbeddingProgress: { step: string; ratio: number } | null;
+  // Attention / Logit Lens — both expensive (N inferences each), so they only
+  // populate when the user explicitly clicks "compute".
+  attentionResult: AttentionResult | null;
+  attentionProgress: { step: string; ratio: number } | null;
+  logitLensResult: LogitLensResult | null;
+  logitLensProgress: { step: string; ratio: number } | null;
+  // Predictions UI toggles — autoplay walks the top-1 chain at a fixed pace,
+  // heatmap recolors candidates by probability instead of category.
+  autoplay: boolean;
+  heatmap: boolean;
+  // Visual settings (Cycle 3.2 settings drawer writes these).
+  perfMode: 'high' | 'low';
+  accent: 'cyan' | 'violet' | 'emerald' | 'amber';
+  // Embeddings UI state — search query, distance-tool selections, 2D toggle.
+  embeddingSearch: string;
+  embeddingTwoD: boolean;
+  // The two selected point ids (`category/text`) for the distance tool.
+  embeddingDistanceA: string | null;
+  embeddingDistanceB: string | null;
 
   setPrompt: (prompt: string) => void;
   setSampling: (next: Partial<SamplingParams>) => void;
@@ -62,6 +114,23 @@ interface AppState {
   setEmbeddingTextSize: (v: number) => void;
   setRealEmbeddings: (pts: AppState['realEmbeddings']) => void;
   setRealEmbeddingProgress: (p: AppState['realEmbeddingProgress']) => void;
+  setAttentionResult: (r: AttentionResult | null) => void;
+  setAttentionProgress: (p: AppState['attentionProgress']) => void;
+  setLogitLensResult: (r: LogitLensResult | null) => void;
+  setLogitLensProgress: (p: AppState['logitLensProgress']) => void;
+  setAutoplay: (v: boolean) => void;
+  setHeatmap: (v: boolean) => void;
+  setPerfMode: (v: 'high' | 'low') => void;
+  setAccent: (v: AppState['accent']) => void;
+  setEmbeddingSearch: (q: string) => void;
+  setEmbeddingTwoD: (v: boolean) => void;
+  // Toggle the distance tool: clicking a point picks A, then B; clicking again
+  // resets the pair. Returns nothing.
+  pickDistancePoint: (id: string) => void;
+  clearDistance: () => void;
+  // Autoplay convenience: pick the top-1 candidate of the current tip and
+  // commit it as the new tip. No-op if the tip has no candidates yet.
+  autoStepTopOne: () => void;
 }
 
 const ROOT_ID = 'root';
@@ -144,6 +213,18 @@ export const useStore = create<AppState>((set, get) => {
     embeddingTextSize: 3.5,
     realEmbeddings: null,
     realEmbeddingProgress: null,
+    attentionResult: null,
+    attentionProgress: null,
+    logitLensResult: null,
+    logitLensProgress: null,
+    autoplay: false,
+    heatmap: false,
+    perfMode: 'high',
+    accent: 'cyan',
+    embeddingSearch: '',
+    embeddingTwoD: false,
+    embeddingDistanceA: null,
+    embeddingDistanceB: null,
 
     setPrompt: (prompt) => {
       const existingRoot = get().nodes[ROOT_ID];
@@ -218,6 +299,38 @@ export const useStore = create<AppState>((set, get) => {
     setEmbeddingSpread: (v) => set({ embeddingSpread: v }),
     setEmbeddingTextSize: (v) => set({ embeddingTextSize: v }),
     setRealEmbeddings: (pts) => set({ realEmbeddings: pts }),
-    setRealEmbeddingProgress: (p) => set({ realEmbeddingProgress: p })
+    setRealEmbeddingProgress: (p) => set({ realEmbeddingProgress: p }),
+    setAttentionResult: (r) => set({ attentionResult: r }),
+    setAttentionProgress: (p) => set({ attentionProgress: p }),
+    setLogitLensResult: (r) => set({ logitLensResult: r }),
+    setLogitLensProgress: (p) => set({ logitLensProgress: p }),
+    setAutoplay: (v) => set({ autoplay: v }),
+    setHeatmap: (v) => set({ heatmap: v }),
+    setPerfMode: (v) => set({ perfMode: v }),
+    setAccent: (v) => set({ accent: v }),
+
+    setEmbeddingSearch: (q) => set({ embeddingSearch: q }),
+    setEmbeddingTwoD: (v) => set({ embeddingTwoD: v }),
+    pickDistancePoint: (id) => {
+      const { embeddingDistanceA, embeddingDistanceB } = get();
+      // 3-state cycle: empty → A picked → both picked → empty.
+      if (!embeddingDistanceA) {
+        set({ embeddingDistanceA: id, embeddingDistanceB: null });
+      } else if (!embeddingDistanceB && id !== embeddingDistanceA) {
+        set({ embeddingDistanceB: id });
+      } else {
+        set({ embeddingDistanceA: id, embeddingDistanceB: null });
+      }
+    },
+    clearDistance: () => set({ embeddingDistanceA: null, embeddingDistanceB: null }),
+
+    autoStepTopOne: () => {
+      const state = get();
+      const tip = state.nodes[state.tipNodeId];
+      if (!tip || !tip.candidates || tip.candidates.length === 0) return;
+      // Reuse the existing expand() so branching/cleanup logic stays in one place.
+      const top1 = tip.candidates[0];
+      get().expand(state.tipNodeId, top1);
+    }
   };
 });

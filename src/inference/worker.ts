@@ -108,18 +108,70 @@ async function streamDistribution(prompt: string, nodeId: string): Promise<void>
   }
 }
 
+// Single-shot inference for attention/logit-lens. Returns input tokens and the
+// top-K next-token distribution in one message. No streaming, no checkpoints —
+// the caller batches these by hand and shows their own progress.
+async function rawDistribution(prompt: string, requestId: string): Promise<void> {
+  const tokenizer = await tokenizerPromise!;
+  const model = await modelPromise!;
+
+  const trimmed = prompt.replace(/\s+$/, '');
+  const safePrompt = trimmed.length === 0 ? '\n' : trimmed;
+  const encoded = await (tokenizer as unknown as (text: string, opts: object) => Promise<{ input_ids: import('@huggingface/transformers').Tensor }>)(safePrompt, { return_tensors: 'pt' });
+
+  const inputIdsTensor = encoded.input_ids;
+  const inputIdsRaw = Array.from(inputIdsTensor.data as unknown as Iterable<number | bigint>).map((v) => Number(v));
+  const inputTokens: InputToken[] = inputIdsRaw.map((id) => ({
+    id,
+    text: tokenizer.decode([id], { skip_special_tokens: false })
+  }));
+
+  const out = await (model as unknown as (inputs: unknown) => Promise<{ logits: import('@huggingface/transformers').Tensor }>)(encoded);
+  const logits = out.logits;
+  const lastIndex = logits.dims[1] - 1;
+  const lastSlice = logits.slice(null, [lastIndex, lastIndex + 1], null);
+  const flat = Array.from(lastSlice.data as Float32Array);
+  const indexed = flat.map((logit, id) => ({ id, logit }));
+  indexed.sort((a, b) => b.logit - a.logit);
+  const top = indexed.slice(0, TOP_K);
+  const candidates: CandidateToken[] = top.map((t) => ({
+    id: t.id,
+    logit: t.logit,
+    text: tokenizer.decode([t.id], { skip_special_tokens: false })
+  }));
+
+  post({
+    type: 'raw-distribution-response',
+    requestId,
+    inputTokens,
+    candidates
+  });
+}
+
 self.addEventListener('message', async (ev: MessageEvent<WorkerInbound>) => {
   const msg = ev.data;
-  if (msg.type !== 'distribution-request') return;
-  try {
-    await ensureModel();
-    await streamDistribution(msg.prompt, msg.nodeId);
-  } catch (err) {
-    post({
-      type: 'distribution-error',
-      nodeId: msg.nodeId,
-      error: err instanceof Error ? err.message : String(err)
-    });
+  if (msg.type === 'distribution-request') {
+    try {
+      await ensureModel();
+      await streamDistribution(msg.prompt, msg.nodeId);
+    } catch (err) {
+      post({
+        type: 'distribution-error',
+        nodeId: msg.nodeId,
+        error: err instanceof Error ? err.message : String(err)
+      });
+    }
+  } else if (msg.type === 'raw-distribution-request') {
+    try {
+      await ensureModel();
+      await rawDistribution(msg.prompt, msg.requestId);
+    } catch (err) {
+      post({
+        type: 'raw-distribution-error',
+        requestId: msg.requestId,
+        error: err instanceof Error ? err.message : String(err)
+      });
+    }
   }
 });
 

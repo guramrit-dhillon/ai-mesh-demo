@@ -1,6 +1,216 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Space+Grotesk:wght@500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap');
+
 @tailwind base;
 @tailwind components;
 @tailwind utilities;
 
+/* ---------------- MESH design tokens ----------------
+ * Single source of truth for color, depth and motion.
+ * Settings drawer mutates these vars to retheme at runtime. */
+:root {
+  /* Background depths */
+  --mesh-ink:    3 8 15;        /* deepest space — page bg */
+  --mesh-panel: 10 22 36;       /* panel surface */
+  --mesh-edge:  31 53 79;       /* hairline borders */
+  --mesh-mute:  78 102 128;     /* secondary text */
+  --mesh-dim:   148 174 196;    /* tertiary text */
+  --mesh-fg:    222 240 252;    /* primary text */
+
+  /* Brand accent (themable) */
+  --mesh-accent: 124 228 255;   /* cyan */
+  --mesh-accent-rgb: 124, 228, 255;
+  --mesh-warm:   255 184 77;    /* amber for warnings/highlights */
+  --mesh-good:   123 227 154;   /* matched/success green */
+  --mesh-bad:    255 110 130;   /* destructive */
+
+  /* Performance tier — simple gate the canvases read for fx density */
+  --mesh-perf: 1;
+}
+
+[data-perf='low'] { --mesh-perf: 0; }
+
+[data-accent='violet'] {
+  --mesh-accent: 167 139 250;
+  --mesh-accent-rgb: 167, 139, 250;
+}
+[data-accent='emerald'] {
+  --mesh-accent: 110 231 183;
+  --mesh-accent-rgb: 110, 231, 183;
+}
+[data-accent='amber'] {
+  --mesh-accent: 251 191 36;
+  --mesh-accent-rgb: 251, 191, 36;
+}
+
 html, body, #root { height: 100%; }
-body { margin: 0; font-family: ui-sans-serif, system-ui, sans-serif; }
+body {
+  margin: 0;
+  font-family: 'Inter', ui-sans-serif, system-ui, sans-serif;
+  background: rgb(var(--mesh-ink));
+  color: rgb(var(--mesh-fg));
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  overscroll-behavior: none;
+}
+
+/* MESH chrome utilities — used by App shell + panels */
+.mesh-panel {
+  background: linear-gradient(180deg,
+    rgba(var(--mesh-panel) / 0.85) 0%,
+    rgba(var(--mesh-panel) / 0.65) 100%);
+  border: 1px solid rgba(var(--mesh-edge) / 0.7);
+  backdrop-filter: blur(10px) saturate(120%);
+  -webkit-backdrop-filter: blur(10px) saturate(120%);
+}
+
+.mesh-corner-bracket {
+  position: relative;
+}
+.mesh-corner-bracket::before,
+.mesh-corner-bracket::after {
+  content: '';
+  position: absolute;
+  width: 10px;
+  height: 10px;
+  border-color: rgb(var(--mesh-accent));
+}
+.mesh-corner-bracket::before {
+  top: -1px; left: -1px;
+  border-top: 1px solid;
+  border-left: 1px solid;
+}
+.mesh-corner-bracket::after {
+  bottom: -1px; right: -1px;
+  border-bottom: 1px solid;
+  border-right: 1px solid;
+}
+
+.mesh-glow {
+  box-shadow:
+    0 0 0 1px rgba(var(--mesh-accent) / 0.35),
+    0 0 24px -4px rgba(var(--mesh-accent) / 0.4);
+}
+
+.mesh-divider {
+  height: 1px;
+  background: linear-gradient(90deg,
+    transparent 0%,
+    rgba(var(--mesh-accent) / 0.3) 30%,
+    rgba(var(--mesh-accent) / 0.3) 70%,
+    transparent 100%);
+}
+
+/* Holographic scanline texture for canvases */
+.mesh-scanlines::before {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background-image: repeating-linear-gradient(
+    0deg,
+    rgba(var(--mesh-accent) / 0.04) 0px,
+    rgba(var(--mesh-accent) / 0.04) 1px,
+    transparent 2px,
+    transparent 4px
+  );
+  mix-blend-mode: screen;
+  pointer-events: none;
+}
+
+/* Range input restyle */
+input[type='range'].mesh-range {
+  -webkit-appearance: none;
+  appearance: none;
+  width: 100%;
+  height: 4px;
+  background: rgba(var(--mesh-edge) / 0.6);
+  border-radius: 2px;
+  outline: none;
+}
+input[type='range'].mesh-range::-webkit-slider-thumb {
+  -webkit-appearance: none;
+  width: 14px;
+  height: 14px;
+  border-radius: 50%;
+  background: rgb(var(--mesh-accent));
+  cursor: pointer;
+  box-shadow:
+    0 0 0 3px rgba(var(--mesh-accent) / 0.18),
+    0 0 12px rgba(var(--mesh-accent) / 0.55);
+  transition: transform 120ms ease;
+}
+input[type='range'].mesh-range::-webkit-slider-thumb:hover {
+  transform: scale(1.15);
+}
+input[type='range'].mesh-range::-moz-range-thumb {
+  width: 14px;
+  height: 14px;
+  border: none;
+  border-radius: 50%;
+  background: rgb(var(--mesh-accent));
+  cursor: pointer;
+}
+
+/* Buttons */
+.mesh-btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  font-family: 'JetBrains Mono', ui-monospace, monospace;
+  font-size: 11px;
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+  padding: 8px 14px;
+  border-radius: 4px;
+  border: 1px solid rgba(var(--mesh-accent) / 0.4);
+  background: linear-gradient(180deg,
+    rgba(var(--mesh-accent) / 0.18) 0%,
+    rgba(var(--mesh-accent) / 0.08) 100%);
+  color: rgb(var(--mesh-fg));
+  cursor: pointer;
+  transition: all 140ms ease;
+  position: relative;
+  overflow: hidden;
+}
+.mesh-btn:hover:not(:disabled) {
+  border-color: rgb(var(--mesh-accent));
+  background: linear-gradient(180deg,
+    rgba(var(--mesh-accent) / 0.32) 0%,
+    rgba(var(--mesh-accent) / 0.16) 100%);
+  box-shadow: 0 0 18px -2px rgba(var(--mesh-accent) / 0.5);
+}
+.mesh-btn:active:not(:disabled) {
+  transform: translateY(1px);
+}
+.mesh-btn:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+}
+.mesh-btn-ghost {
+  border-color: rgba(var(--mesh-edge) / 0.7);
+  background: transparent;
+  color: rgb(var(--mesh-dim));
+}
+.mesh-btn-ghost:hover:not(:disabled) {
+  border-color: rgba(var(--mesh-accent) / 0.6);
+  color: rgb(var(--mesh-fg));
+  background: rgba(var(--mesh-panel) / 0.6);
+  box-shadow: none;
+}
+
+/* Custom scrollbar */
+::-webkit-scrollbar { width: 8px; height: 8px; }
+::-webkit-scrollbar-track { background: transparent; }
+::-webkit-scrollbar-thumb {
+  background: rgba(var(--mesh-edge) / 0.7);
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: rgba(var(--mesh-accent) / 0.5);
+}
+
+/* Selection */
+::selection {
+  background: rgba(var(--mesh-accent) / 0.35);
+  color: rgb(var(--mesh-fg));
+}

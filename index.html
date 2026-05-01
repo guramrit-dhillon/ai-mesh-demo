@@ -1,9 +1,18 @@
 <!doctype html>
-<html lang="en" class="bg-slate-950 text-slate-100">
+<html lang="en">
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>LLM Visualizer</title>
+    <meta name="description" content="MESH — a live look inside language models. See next-token predictions, embeddings, attention, and logit lens running in your browser." />
+    <meta name="theme-color" content="#030814" />
+    <link rel="preconnect" href="https://fonts.googleapis.com" />
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin />
+    <title>MESH — a live look inside language models</title>
+    <style>
+      /* Pre-React paint so the page never shows white. */
+      html, body { background: #030814; color: #def0fc; margin: 0; }
+      #root { min-height: 100%; }
+    </style>
   </head>
   <body>
     <div id="root"></div>

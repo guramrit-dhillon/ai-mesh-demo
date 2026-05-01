@@ -5,3 +5,6 @@ logs
 *.log
 .superpowers
 .claude
+
+# Dev iteration screenshots in repo root (smoke tests during the redesign)
+/*.png

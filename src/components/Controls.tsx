@@ -1,4 +1,5 @@
 import { useStore } from '../store';
+import { useAutoplay } from '../hooks/useAutoplay';
 
 interface SliderProps {
   label: string;
@@ -13,28 +14,77 @@ interface SliderProps {
 function Slider({ label, value, min, max, step, display, onChange }: SliderProps) {
   return (
     <label className="block">
-      <div className="mb-1 flex items-center justify-between text-xs text-slate-400">
-        <span className="uppercase tracking-wide">{label}</span>
-        <span className="font-mono text-slate-200">{display}</span>
+      <div className="mb-1.5 flex items-center justify-between font-mono text-[10px] uppercase tracking-[0.18em]">
+        <span className="text-mesh-mute">{label}</span>
+        <span className="text-mesh-fg">{display}</span>
       </div>
       <input
         type="range"
+        className="mesh-range"
         min={min}
         max={max}
         step={step}
         value={value}
         onChange={(e) => onChange(Number(e.target.value))}
-        className="w-full accent-blue-500"
       />
     </label>
+  );
+}
+
+interface ToggleProps {
+  label: string;
+  on: boolean;
+  onChange: (next: boolean) => void;
+  hint?: string;
+}
+
+function Toggle({ label, on, onChange, hint }: ToggleProps) {
+  return (
+    <button
+      onClick={() => onChange(!on)}
+      className={`group flex w-full items-center justify-between gap-3 rounded-md border px-3 py-2 text-left transition ${
+        on
+          ? 'border-mesh-accent/50 bg-mesh-accent/10'
+          : 'border-mesh-edge/60 bg-mesh-panel/40 hover:border-mesh-accent/30'
+      }`}
+    >
+      <div className="flex flex-col">
+        <span className="font-mono text-[10px] uppercase tracking-[0.18em] text-mesh-fg">{label}</span>
+        {hint && <span className="mt-0.5 text-[10px] text-mesh-mute">{hint}</span>}
+      </div>
+      <span
+        className={`relative h-4 w-7 rounded-full transition ${
+          on ? 'bg-mesh-accent' : 'bg-mesh-edge'
+        }`}
+        style={{ boxShadow: on ? '0 0 10px rgb(var(--mesh-accent))' : 'none' }}
+      >
+        <span
+          className="absolute top-0.5 h-3 w-3 rounded-full bg-mesh-ink transition-all"
+          style={{ left: on ? 14 : 2 }}
+        />
+      </span>
+    </button>
   );
 }
 
 export function Controls() {
   const sampling = useStore((s) => s.sampling);
   const setSampling = useStore((s) => s.setSampling);
+  const autoplay = useStore((s) => s.autoplay);
+  const heatmap = useStore((s) => s.heatmap);
+  const setAutoplay = useStore((s) => s.setAutoplay);
+  const setHeatmap = useStore((s) => s.setHeatmap);
+
+  // Drives the autoplay timer — lives here so it only ticks while the
+  // predictions panel is mounted.
+  useAutoplay();
+
   return (
-    <div className="space-y-4 rounded-lg border border-slate-700 bg-slate-900/60 p-3">
+    <div className="mesh-panel space-y-4 rounded-lg p-4">
+      <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-mesh-accent">
+        sampling
+      </div>
+
       <Slider
         label="Temperature"
         value={sampling.temperature}
@@ -45,7 +95,7 @@ export function Controls() {
         onChange={(v) => setSampling({ temperature: v })}
       />
       <Slider
-        label="Top-k"
+        label="Top-K"
         value={sampling.topK}
         min={1}
         max={50}
@@ -54,7 +104,7 @@ export function Controls() {
         onChange={(v) => setSampling({ topK: v })}
       />
       <Slider
-        label="Top-p"
+        label="Top-P"
         value={sampling.topP}
         min={0.05}
         max={1.0}
@@ -62,6 +112,33 @@ export function Controls() {
         display={sampling.topP.toFixed(2)}
         onChange={(v) => setSampling({ topP: v })}
       />
+
+      <div className="mesh-divider" />
+
+      <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-mesh-accent">
+        view
+      </div>
+
+      <div className="space-y-2">
+        <Toggle
+          label="Autoplay"
+          on={autoplay}
+          onChange={setAutoplay}
+          hint="Walks the top-1 chain forward"
+        />
+        <Toggle
+          label="Heatmap"
+          on={heatmap}
+          onChange={setHeatmap}
+          hint="Color tokens by probability"
+        />
+      </div>
+
+      {autoplay && (
+        <div className="rounded border border-mesh-accent/30 bg-mesh-accent/5 p-2 text-[10px] text-mesh-dim">
+          <span className="text-mesh-accent">▶</span> generating top-1 every ~0.9s. Toggle off to stop.
+        </div>
+      )}
     </div>
   );
 }

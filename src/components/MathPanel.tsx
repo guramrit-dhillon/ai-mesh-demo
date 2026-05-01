@@ -11,8 +11,13 @@ export function MathPanel() {
 
   if (!node || node.candidates === null || candidateIndex === null) {
     return (
-      <div className="rounded-lg border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-500">
-        Hover a bubble to see its logit, softmax probability, and rank.
+      <div className="mesh-panel rounded-lg p-3 text-[11px] text-mesh-mute">
+        <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-mesh-accent">
+          inspector
+        </div>
+        <p className="mt-2 leading-relaxed">
+          Hover a bubble to see its logit, softmax probability, and rank.
+        </p>
       </div>
     );
   }
@@ -23,26 +28,29 @@ export function MathPanel() {
   const candidate = node.candidates[candidateIndex];
 
   return (
-    <div className="space-y-2 rounded-lg border border-slate-700 bg-slate-900/60 p-3 text-xs text-slate-300">
-      <div className="text-sm font-mono text-slate-100">{renderToken(candidate.text)}</div>
-      <div className="flex justify-between">
-        <span>Raw logit</span>
-        <span className="font-mono">{candidate.logit.toFixed(3)}</span>
+    <div className="mesh-panel space-y-2.5 rounded-lg p-4 text-[11px] text-mesh-dim">
+      <div className="font-mono text-[10px] uppercase tracking-[0.2em] text-mesh-accent">
+        inspector
       </div>
+      <div className="font-mono text-base text-mesh-fg">{renderToken(candidate.text)}</div>
+      <Row label="Raw logit" value={candidate.logit.toFixed(3)} />
+      <Row label={`Softmax prob (T=${sampling.temperature.toFixed(2)})`} value={`${(target.prob * 100).toFixed(2)}%`} />
+      <Row label="Rank" value={`#${target.rank + 1} of ${node.candidates.length}`} />
       <div className="flex justify-between">
-        <span>Softmax prob (T={sampling.temperature.toFixed(2)})</span>
-        <span className="font-mono">{(target.prob * 100).toFixed(2)}%</span>
-      </div>
-      <div className="flex justify-between">
-        <span>Rank</span>
-        <span className="font-mono">#{target.rank + 1} of {node.candidates.length}</span>
-      </div>
-      <div className="flex justify-between">
-        <span>Status</span>
-        <span className={target.alive ? 'text-emerald-400' : 'text-slate-500'}>
-          {target.alive ? 'kept by top-k/top-p' : 'cut by sampling'}
+        <span className="text-mesh-mute">Status</span>
+        <span className={`font-mono ${target.alive ? 'text-mesh-good' : 'text-mesh-mute'}`}>
+          {target.alive ? 'kept' : 'cut'}
         </span>
       </div>
+    </div>
+  );
+}
+
+function Row({ label, value }: { label: string; value: string }) {
+  return (
+    <div className="flex justify-between">
+      <span className="text-mesh-mute">{label}</span>
+      <span className="font-mono text-mesh-fg">{value}</span>
     </div>
   );
 }

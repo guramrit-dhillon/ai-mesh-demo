@@ -51,5 +51,32 @@ export interface ModelStatus {
   error?: string;
 }
 
-export type WorkerOutbound = DistributionResponse | DistributionError | ModelStatus;
-export type WorkerInbound = DistributionRequest;
+// Single-shot distribution (no streaming, no auto-lookahead). Used by Attention
+// and Logit Lens modes which fire many small inferences and just need the final
+// top-1 / top-K back as a Promise.
+export interface RawDistributionRequest {
+  type: 'raw-distribution-request';
+  requestId: string;
+  prompt: string;
+}
+
+export interface RawDistributionResponse {
+  type: 'raw-distribution-response';
+  requestId: string;
+  inputTokens: InputToken[];
+  candidates: CandidateToken[];
+}
+
+export interface RawDistributionError {
+  type: 'raw-distribution-error';
+  requestId: string;
+  error: string;
+}
+
+export type WorkerOutbound =
+  | DistributionResponse
+  | DistributionError
+  | ModelStatus
+  | RawDistributionResponse
+  | RawDistributionError;
+export type WorkerInbound = DistributionRequest | RawDistributionRequest;

@@ -6,6 +6,7 @@ import { UnrealBloomPass } from 'three/examples/jsm/postprocessing/UnrealBloomPa
 import { useStore } from '../store';
 import { score } from '../sampling';
 import { renderToken } from '../tokens';
+import { useAccentRGB, shade, rgba, type AccentRGB } from '../theme/accent';
 import type { CandidateToken, TreeNode } from '../types';
 
 const VISIBLE_PER_NODE = 24;
@@ -304,29 +305,61 @@ function positionsRef_get(
   return positionHints.get(key);
 }
 
-function tokenColor(node: GraphNode): string {
-  // Animus / holo-map cyan palette
+// Map a probability in [0..1] onto a viridis-ish ramp for heatmap mode.
+// Cold/blue at low prob → warm/yellow at high prob, easy to read against the
+// dark backdrop.
+function heatmapColor(prob: number): string {
+  const t = Math.min(1, Math.max(0, prob));
+  // Stops: 0 → cool blue, 0.5 → magenta-pink, 1 → warm yellow
+  const stops = [
+    [60, 88, 220],
+    [180, 64, 200],
+    [240, 130, 110],
+    [255, 220, 90]
+  ];
+  const idx = t * (stops.length - 1);
+  const lo = Math.floor(idx);
+  const hi = Math.min(stops.length - 1, lo + 1);
+  const frac = idx - lo;
+  const r = Math.round(stops[lo][0] + (stops[hi][0] - stops[lo][0]) * frac);
+  const g = Math.round(stops[lo][1] + (stops[hi][1] - stops[lo][1]) * frac);
+  const b = Math.round(stops[lo][2] + (stops[hi][2] - stops[lo][2]) * frac);
+  return `rgb(${r}, ${g}, ${b})`;
+}
+
+function tokenColor(node: GraphNode, heatmap: boolean, accent: AccentRGB): string {
+  // Heatmap override: any candidate/lookahead is colored purely by probability
+  // so the viewer's eye reads the distribution shape at a glance. Chain tokens
+  // (already-committed) keep their accent tint so the spine stays anchored.
+  if (heatmap && node.kind !== 'chain') {
+    if (node.kind === 'lookahead') {
+      return heatmapColor(Math.min(1, node.prob * (0.6 + 0.4 * node.decay)));
+    }
+    if (node.isTop && node.isActive) return heatmapColor(1);
+    if (!node.alive) return '#2a3c4d';
+    return heatmapColor(node.prob);
+  }
+  // Chain tokens — already-committed text. Brightest at the tip, dimmer with age.
   if (node.kind === 'chain') {
-    const t = 0.7 + 0.3 * node.decay;
-    return `rgb(${Math.round(140 * t)}, ${Math.round(230 * t)}, ${Math.round(255 * t)})`;
+    return shade(accent, 0.75 + 0.25 * node.decay);
   }
   if (node.kind === 'lookahead') {
     if (node.isTop) {
-      // Lookahead top-1: bright aqua-mint, easy to spot at any depth
-      return `rgb(140, 255, 230)`;
+      // Lookahead top-1 is the predicted future — bright accent + slight white
+      // mix so it pops vs the active fan's top-1 (which is even brighter).
+      return shade(accent, 0.95, 0.05);
     }
-    // Non-top lookahead: keep visibility floor so deep levels are still legible
-    const t = Math.max(0.55, node.decay * (0.6 + 0.4 * node.prob));
-    return `rgb(${Math.round(110 * t + 80)}, ${Math.round(200 * t + 55)}, ${Math.round(225 * t + 30)})`;
+    return shade(accent, Math.max(0.45, node.decay * (0.55 + 0.4 * node.prob)));
   }
-  if (node.isTop && node.isActive) return '#e8fbff';
+  // Active fan top-1 — the model's current best guess. Near-white.
+  if (node.isTop && node.isActive) return shade(accent, 1, 0.55);
   if (node.isActive) {
-    if (!node.alive) return '#3a5066';
-    const t = 0.65 + 0.35 * node.prob;
-    return `rgb(${Math.round(120 * t)}, ${Math.round(225 * t)}, ${Math.round(255 * t)})`;
+    if (!node.alive) return shade(accent, 0.28); // pruned by top-k/top-p
+    return shade(accent, 0.55 + 0.4 * node.prob);
   }
-  if (node.isChosen) return '#7ce4ff';
-  return '#33536b';
+  // Historical chosen (the path the user took). Same hue, mid-brightness.
+  if (node.isChosen) return shade(accent, 0.7);
+  return shade(accent, 0.32);
 }
 
 function tokenSize(node: GraphNode): number {
@@ -342,28 +375,34 @@ function tokenSize(node: GraphNode): number {
   return 3 + 2.5 * node.decay;
 }
 
-function linkColor(link: GraphLink): string {
-  // Cyan/teal links for the holo-map look
+function linkColor(link: GraphLink, accent: AccentRGB): string {
+  // Accent-toned links so the scene retints with the user's chosen color.
+  const [r, g, b] = accent;
   const i = Math.min(1, link.intensity);
-  if (link.isChain) {
-    return `rgba(120, 235, 255, ${0.4 + 0.6 * i})`;
-  }
   if (link.isTopFan) {
-    return `rgba(180, 250, 255, ${0.55 + 0.45 * i})`;
+    // Active top-1 fan link — strongest, slightly white-mixed so it leads the eye.
+    const a = 0.7 + 0.3 * i;
+    return `rgba(${Math.min(255, r + 60)}, ${Math.min(255, g + 30)}, ${Math.min(255, b + 20)}, ${a})`;
+  }
+  if (link.isActiveFan) {
+    return `rgba(${r}, ${g}, ${b}, ${0.35 + 0.5 * i})`;
   }
   if (link.isLookahead) {
-    const a = 0.12 + 0.5 * i;
-    return `rgba(140, 230, 220, ${a})`;
+    return `rgba(${r}, ${g}, ${b}, ${0.1 + 0.4 * i})`;
   }
-  return `rgba(100, 200, 230, ${0.18 * i + 0.05})`;
+  if (link.isChain) {
+    return `rgba(${r}, ${g}, ${b}, ${0.3 + 0.5 * i})`;
+  }
+  return `rgba(${r}, ${g}, ${b}, ${0.08 + 0.18 * i})`;
 }
 
-function makeSprite(node: GraphNode): THREE.Object3D {
+function makeSprite(node: GraphNode, heatmap: boolean, accent: AccentRGB): THREE.Object3D {
   const sprite = new SpriteText(renderToken(node.text));
-  const color = tokenColor(node);
+  const color = tokenColor(node, heatmap, accent);
   sprite.color = color;
-  sprite.fontFace = 'ui-monospace, monospace';
-  sprite.fontWeight = node.isTop && node.isActive ? '700' : '500';
+  // JetBrains Mono lines up cleanly with the rest of the MESH HUD type system.
+  sprite.fontFace = 'JetBrains Mono, ui-monospace, SFMono-Regular, monospace';
+  sprite.fontWeight = node.isTop && node.isActive ? '700' : node.kind === 'chain' && node.isTip ? '600' : '500';
   sprite.textHeight = tokenSize(node);
   sprite.material.depthWrite = false;
   sprite.material.transparent = true;
@@ -374,17 +413,27 @@ function makeSprite(node: GraphNode): THREE.Object3D {
   // scale based on its rendered text bitmap).
   const wrapper = new THREE.Group();
 
+  // Layered halo + ring for the active top-1 — the scene's hero element.
   if (node.isTop && node.isActive) {
+    const [r, g, b] = accent;
+    const lit: AccentRGB = [Math.min(255, r + 50), Math.min(255, g + 40), Math.min(255, b + 30)];
     const haloCanvas = document.createElement('canvas');
     haloCanvas.width = 256;
     haloCanvas.height = 256;
     const ctx = haloCanvas.getContext('2d')!;
+    // Soft radial bloom
     const grad = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
-    grad.addColorStop(0, 'rgba(165,220,255,0.55)');
-    grad.addColorStop(0.5, 'rgba(120,200,235,0.18)');
+    grad.addColorStop(0, rgba(accent, 0.6));
+    grad.addColorStop(0.45, rgba(accent, 0.18));
     grad.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 256, 256);
+    // Outer ring — tight stroke at ~r=110 for a definite shape
+    ctx.strokeStyle = rgba(lit, 0.85);
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.arc(128, 128, 108, 0, Math.PI * 2);
+    ctx.stroke();
     const haloTex = new THREE.CanvasTexture(haloCanvas);
     const haloMat = new THREE.SpriteMaterial({
       map: haloTex,
@@ -393,8 +442,30 @@ function makeSprite(node: GraphNode): THREE.Object3D {
       blending: THREE.AdditiveBlending
     });
     const halo = new THREE.Sprite(haloMat);
-    halo.scale.set(40, 40, 1);
+    halo.scale.set(46, 46, 1);
     wrapper.add(halo);
+  }
+
+  // Subtle dot under historical-chosen tokens so the user can read the path.
+  if (node.isChosen && !node.isActive) {
+    const dotCanvas = document.createElement('canvas');
+    dotCanvas.width = 64;
+    dotCanvas.height = 64;
+    const ctx = dotCanvas.getContext('2d')!;
+    const grad = ctx.createRadialGradient(32, 32, 0, 32, 32, 32);
+    grad.addColorStop(0, rgba(accent, 0.55));
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, 64, 64);
+    const dotMat = new THREE.SpriteMaterial({
+      map: new THREE.CanvasTexture(dotCanvas),
+      transparent: true,
+      depthWrite: false,
+      blending: THREE.AdditiveBlending
+    });
+    const dot = new THREE.Sprite(dotMat);
+    dot.scale.set(14, 14, 1);
+    wrapper.add(dot);
   }
 
   wrapper.add(sprite);
@@ -409,7 +480,7 @@ function makeSprite(node: GraphNode): THREE.Object3D {
 
 function FallbackOverlay({ message, isError }: { message: string; isError?: boolean }) {
   return (
-    <div className={`flex h-full items-center justify-center ${isError ? 'text-red-400' : 'text-slate-500'}`}>
+    <div className={`flex h-full items-center justify-center font-mono text-[11px] uppercase tracking-[0.2em] ${isError ? 'text-mesh-bad' : 'text-mesh-mute'}`}>
       {message}
     </div>
   );
@@ -422,6 +493,8 @@ export function MeshCanvas() {
   const sampling = useStore((s) => s.sampling);
   const expand = useStore((s) => s.expand);
   const setHover = useStore((s) => s.setHover);
+  const heatmap = useStore((s) => s.heatmap);
+  const accentRGB = useAccentRGB();
   const isThinking =
     !!tipNode && (tipNode.status === 'loading' || !tipNode.candidates);
   const hasAnyData = !!tipNode?.candidates && !!tipNode?.inputTokens;
@@ -491,7 +564,11 @@ export function MeshCanvas() {
         const age = now - ud.__fadeStart;
         if (age < 0) return;
         const t = Math.min(age / FADE_MS, 1);
-        const eased = 1 - Math.pow(1 - t, 3);
+        // easeOutBack — slight overshoot at t=0.85 then settles to 1.0. Gives sprites
+        // a pleasing "drop in" feel instead of just sliding to size.
+        const c = 1.65;
+        const t1 = t - 1;
+        const eased = 1 + (c + 1) * t1 * t1 * t1 + c * t1 * t1;
         obj.scale.setScalar(eased);
         if (t >= 1) delete ud.__fadeStart;
       });
@@ -510,13 +587,16 @@ export function MeshCanvas() {
         }
       | null;
     if (!fg) return;
+    // Snapshot perf mode at mount — bloom is the heaviest pass, so skipping
+    // it on low-end devices is the single biggest win. Star count also drops.
+    const perf = useStore.getState().perfMode;
     // Add a starfield to the underlying THREE scene once.
     const scene = fg.scene();
     const STAR_TAG = 'llm-viz-stars';
     const existing = scene.children.find((c) => c.name === STAR_TAG);
     if (!existing) {
       const starGeom = new THREE.BufferGeometry();
-      const starCount = 6000;
+      const starCount = perf === 'low' ? 1800 : 6000;
       const positions = new Float32Array(starCount * 3);
       for (let i = 0; i < starCount; i++) {
         const r = 400 + Math.random() * 1600;
@@ -527,12 +607,13 @@ export function MeshCanvas() {
         positions[i * 3 + 2] = r * Math.cos(phi);
       }
       starGeom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
+      const [sr, sg, sb] = accentRGB;
       const starMat = new THREE.PointsMaterial({
-        color: 0x7ce4ff,
+        color: new THREE.Color(sr / 255, sg / 255, sb / 255),
         size: 1.4,
         sizeAttenuation: true,
         transparent: true,
-        opacity: 0.6
+        opacity: 0.55
       });
       const stars = new THREE.Points(starGeom, starMat);
       stars.name = STAR_TAG;
@@ -544,20 +625,26 @@ export function MeshCanvas() {
     // with the chain.
     const GRID_TAG = 'llm-viz-grid';
     if (!scene.children.find((c) => c.name === GRID_TAG)) {
-      const grid = new THREE.GridHelper(800, 80, 0x4dd9ff, 0x1a4a66) as THREE.Object3D;
-      // dispose-friendly material tweaks
+      const [ar, ag, ab] = accentRGB;
+      const grid = new THREE.GridHelper(
+        900,
+        90,
+        new THREE.Color(ar / 255, ag / 255, ab / 255),
+        new THREE.Color((ar * 0.35) / 255, (ag * 0.35) / 255, (ab * 0.35) / 255)
+      ) as THREE.Object3D;
       const gridLines = grid as unknown as { material?: { transparent: boolean; opacity: number } };
       if (gridLines.material) {
         gridLines.material.transparent = true;
-        gridLines.material.opacity = 0.18;
+        gridLines.material.opacity = 0.16;
       }
-      grid.position.y = -120;
+      grid.position.y = -90;
       grid.name = GRID_TAG;
       scene.add(grid);
     }
 
     // Stronger bloom — the holo look needs noticeable blooming on the bright text.
-    if (fg.postProcessingComposer) {
+    // Skip entirely in low-perf mode: bloom is the heaviest pass in the scene.
+    if (perf !== 'low' && fg.postProcessingComposer) {
       try {
         const composer = fg.postProcessingComposer();
         const bloomPass = new UnrealBloomPass(
@@ -572,6 +659,48 @@ export function MeshCanvas() {
       }
     }
   }, []);
+
+  // Retint stars + grid when the accent changes. Runs separately from the
+  // one-shot scene-init above so users see the recolor live (instead of
+  // having to switch lenses to remount the canvas).
+  useEffect(() => {
+    const fg = fgRef.current as { scene?: () => THREE.Scene } | null;
+    if (!fg?.scene) return;
+    let scene: THREE.Scene;
+    try { scene = fg.scene(); } catch { return; }
+    const [ar, ag, ab] = accentRGB;
+    // Stars: update material color in place.
+    const stars = scene.children.find((c) => c.name === 'llm-viz-stars') as THREE.Points | undefined;
+    if (stars) {
+      const mat = stars.material as THREE.PointsMaterial;
+      mat.color.setRGB(ar / 255, ag / 255, ab / 255);
+      mat.needsUpdate = true;
+    }
+    // Grid: line colors are baked into the geometry's color attribute, so
+    // dispose + rebuild is the cleanest way to retint reliably.
+    const oldGrid = scene.children.find((c) => c.name === 'llm-viz-grid');
+    if (oldGrid) {
+      scene.remove(oldGrid);
+      // Best-effort cleanup — types are loose enough that we just guard.
+      const og = oldGrid as unknown as { geometry?: { dispose?: () => void }; material?: { dispose?: () => void } };
+      og.geometry?.dispose?.();
+      og.material?.dispose?.();
+      const grid = new THREE.GridHelper(
+        900,
+        90,
+        new THREE.Color(ar / 255, ag / 255, ab / 255),
+        new THREE.Color((ar * 0.35) / 255, (ag * 0.35) / 255, (ab * 0.35) / 255)
+      ) as THREE.Object3D;
+      const lineMat = grid as unknown as { material?: { transparent: boolean; opacity: number } };
+      if (lineMat.material) {
+        lineMat.material.transparent = true;
+        lineMat.material.opacity = 0.16;
+      }
+      grid.position.y = -90;
+      grid.name = 'llm-viz-grid';
+      scene.add(grid);
+    }
+  }, [accentRGB]);
 
   useEffect(() => {
     const fg = fgRef.current as
@@ -700,10 +829,27 @@ export function MeshCanvas() {
       ref={containerRef}
       className="relative h-full w-full"
       style={{
-        background:
-          'radial-gradient(ellipse at 50% 55%, #0a2a3e 0%, #061829 38%, #030914 70%, #01040a 100%)'
+        // Layered gradient: subtle accent halo at the focal point, fading to
+        // deep ink at the edges. Uses CSS vars so it retints with the accent.
+        background: `
+          radial-gradient(ellipse 65% 50% at 50% 55%, rgba(var(--mesh-accent) / 0.10) 0%, transparent 70%),
+          radial-gradient(ellipse at 50% 55%, rgb(8, 26, 42) 0%, rgb(5, 17, 30) 38%, rgb(3, 8, 20) 72%, rgb(1, 4, 10) 100%)
+        `
       }}
     >
+      {/* Faint horizon grid plane — adds spatial anchoring without dominating */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundImage:
+            'linear-gradient(rgba(var(--mesh-accent) / 0.06) 1px, transparent 1px), linear-gradient(90deg, rgba(var(--mesh-accent) / 0.06) 1px, transparent 1px)',
+          backgroundSize: '64px 64px',
+          maskImage:
+            'linear-gradient(180deg, transparent 30%, rgba(0,0,0,0.6) 70%, transparent 100%)',
+          WebkitMaskImage:
+            'linear-gradient(180deg, transparent 30%, rgba(0,0,0,0.6) 70%, transparent 100%)'
+        }}
+      />
       <ForceGraph3D
         ref={fgRef as never}
         width={size?.width}
@@ -712,9 +858,9 @@ export function MeshCanvas() {
         backgroundColor="rgba(0,0,0,0)"
         showNavInfo={false}
         controlType="orbit"
-        nodeThreeObject={(node) => makeSprite(node as unknown as GraphNode)}
+        nodeThreeObject={(node) => makeSprite(node as unknown as GraphNode, heatmap, accentRGB)}
         nodeThreeObjectExtend={false}
-        linkColor={(l) => linkColor(l as unknown as GraphLink)}
+        linkColor={(l) => linkColor(l as unknown as GraphLink, accentRGB)}
         linkOpacity={1}
         linkWidth={(l) => {
           const link = l as unknown as GraphLink;
@@ -772,7 +918,7 @@ export function MeshCanvas() {
         className="pointer-events-none absolute inset-0"
         style={{
           backgroundImage:
-            'repeating-linear-gradient(0deg, rgba(125, 235, 255, 0.04) 0px, rgba(125, 235, 255, 0.04) 1px, transparent 2px, transparent 4px)',
+            'repeating-linear-gradient(0deg, rgba(var(--mesh-accent) / 0.04) 0px, rgba(var(--mesh-accent) / 0.04) 1px, transparent 2px, transparent 4px)',
           mixBlendMode: 'screen'
         }}
       />
@@ -786,11 +932,17 @@ export function MeshCanvas() {
       />
 
       {isThinking && (
-        <div className="pointer-events-none absolute right-4 top-4 flex items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-500/10 px-3 py-1 backdrop-blur-sm">
-          <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-300" />
-          <span className="text-[10px] uppercase tracking-wider text-cyan-200/80">thinking</span>
+        <div className="pointer-events-none absolute left-1/2 top-4 flex -translate-x-1/2 items-center gap-2 rounded-full border border-mesh-edge/60 bg-mesh-panel/80 px-3 py-1 backdrop-blur">
+          <span className="inline-block h-1.5 w-1.5 animate-mesh-pulse rounded-full bg-mesh-accent shadow-[0_0_8px_rgb(var(--mesh-accent))]" />
+          <span className="font-mono text-[10px] uppercase tracking-[0.2em] text-mesh-dim">thinking</span>
         </div>
       )}
+
+      {/* Confidence ring — top-1 probability of the current tip's distribution. */}
+      <ConfidenceRing />
+
+      {/* Heatmap legend — only when heatmap mode is on. */}
+      {heatmap && <HeatmapLegend />}
 
       {/* Top-left controls: recenter + fullscreen */}
       <div className="absolute left-4 top-4 flex items-center gap-2">
@@ -823,7 +975,7 @@ export function MeshCanvas() {
               fitter(700, 100, (n) => !!n.isTip || (n.kind === 'candidate' && !!n.isActive));
             } catch { /* */ }
           }}
-          className="rounded-full border border-cyan-400/30 bg-cyan-500/10 px-3 py-1 text-[10px] uppercase tracking-wider text-cyan-200/80 backdrop-blur-sm hover:bg-cyan-500/20"
+          className="mesh-btn mesh-btn-ghost backdrop-blur"
         >
           recenter
         </button>
@@ -837,7 +989,7 @@ export function MeshCanvas() {
               el.requestFullscreen?.();
             }
           }}
-          className="rounded-full border border-cyan-400/30 bg-cyan-500/10 px-3 py-1 text-[10px] uppercase tracking-wider text-cyan-200/80 backdrop-blur-sm hover:bg-cyan-500/20"
+          className="mesh-btn mesh-btn-ghost backdrop-blur"
         >
           fullscreen
         </button>
@@ -845,7 +997,7 @@ export function MeshCanvas() {
 
       {/* Pan / orbit hint, fades after a few seconds */}
       <div
-        className="pointer-events-none absolute bottom-4 left-4 text-[10px] uppercase tracking-wider text-cyan-200/40"
+        className="pointer-events-none absolute bottom-4 left-4 font-mono text-[10px] uppercase tracking-[0.2em] text-mesh-mute"
         style={{ animation: 'fadeOut 8s ease-in 4s forwards' }}
       >
         drag = orbit · right-click = pan · scroll = zoom
@@ -853,6 +1005,73 @@ export function MeshCanvas() {
       <style>{`
         @keyframes fadeOut { to { opacity: 0; } }
       `}</style>
+    </div>
+  );
+}
+
+// HUD: a circular gauge showing the model's confidence in its top-1 candidate.
+// Reads the live distribution from the store, applies the user's temperature,
+// and animates the arc length.
+function ConfidenceRing() {
+  const tipNode = useStore((s) => s.nodes[s.tipNodeId]);
+  const temperature = useStore((s) => s.sampling.temperature);
+  if (!tipNode?.candidates || tipNode.candidates.length === 0) return null;
+  const probs = (() => {
+    const T = Math.max(temperature, 1e-6);
+    const ls = tipNode.candidates!.map((c) => c.logit / T);
+    const max = Math.max(...ls);
+    const exps = ls.map((l) => Math.exp(l - max));
+    const sum = exps.reduce((a, b) => a + b, 0);
+    return exps.map((e) => e / sum);
+  })();
+  const top1 = probs[0];
+  const top2 = probs[1] ?? 0;
+  const ratio = top1 / Math.max(top1 + top2, 1e-6);
+  // Visualize as an arc 0..1 of the top-1 mass vs top-2 (decisiveness).
+  const r = 22;
+  const c = 2 * Math.PI * r;
+  const dash = c * Math.max(0.04, ratio);
+  return (
+    <div className="pointer-events-none absolute right-4 top-4 flex items-center gap-2 rounded-md border border-mesh-edge/60 bg-mesh-panel/70 px-2.5 py-1.5 backdrop-blur">
+      <svg width="52" height="52" viewBox="0 0 52 52">
+        <circle cx="26" cy="26" r={r} stroke="rgba(var(--mesh-edge) / 0.6)" strokeWidth="3" fill="none" />
+        <circle
+          cx="26"
+          cy="26"
+          r={r}
+          stroke="rgb(var(--mesh-accent))"
+          strokeWidth="3"
+          fill="none"
+          strokeLinecap="round"
+          strokeDasharray={`${dash} ${c - dash}`}
+          transform="rotate(-90 26 26)"
+          style={{ transition: 'stroke-dasharray 380ms ease', filter: 'drop-shadow(0 0 4px rgb(var(--mesh-accent)))' }}
+        />
+        <text x="26" y="28" textAnchor="middle" className="font-mono" fill="rgb(var(--mesh-fg))" fontSize="11">
+          {Math.round(top1 * 100)}%
+        </text>
+      </svg>
+      <div className="flex flex-col leading-tight">
+        <span className="font-mono text-[8px] uppercase tracking-[0.2em] text-mesh-mute">top-1 conf</span>
+        <span className="font-mono text-[10px] text-mesh-dim">vs #2: {Math.round(top2 * 100)}%</span>
+      </div>
+    </div>
+  );
+}
+
+// Compact gradient bar with min/max labels — readable at a glance.
+function HeatmapLegend() {
+  return (
+    <div className="pointer-events-none absolute bottom-4 right-4 flex items-center gap-2 rounded-md border border-mesh-edge/60 bg-mesh-panel/70 px-3 py-1.5 backdrop-blur">
+      <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-mesh-mute">low</span>
+      <span
+        className="block h-2 w-32 rounded"
+        style={{
+          background:
+            'linear-gradient(90deg, rgb(60,88,220) 0%, rgb(180,64,200) 35%, rgb(240,130,110) 70%, rgb(255,220,90) 100%)'
+        }}
+      />
+      <span className="font-mono text-[9px] uppercase tracking-[0.2em] text-mesh-mute">high · prob</span>
     </div>
   );
 }
