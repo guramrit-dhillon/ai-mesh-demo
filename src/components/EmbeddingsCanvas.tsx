@@ -110,6 +110,32 @@ export function EmbeddingsCanvas() {
     }, 400);
   }, []);
 
+  // Fade-in animation loop (matches MeshCanvas behavior).
+  useEffect(() => {
+    let raf = 0;
+    const FADE_MS = 600;
+    const animate = () => {
+      raf = requestAnimationFrame(animate);
+      const fg = fgRef.current as { scene?: () => THREE.Scene } | null;
+      if (!fg?.scene) return;
+      let scene: THREE.Scene;
+      try { scene = fg.scene(); } catch { return; }
+      const now = performance.now();
+      scene.traverse((obj) => {
+        const ud = obj.userData as { __fadeStart?: number };
+        if (ud.__fadeStart === undefined) return;
+        const age = now - ud.__fadeStart;
+        if (age < 0) return;
+        const t = Math.min(age / FADE_MS, 1);
+        const eased = 1 - Math.pow(1 - t, 3);
+        obj.scale.setScalar(eased);
+        if (t >= 1) delete ud.__fadeStart;
+      });
+    };
+    raf = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(raf);
+  }, []);
+
   return (
     <div
       ref={containerRef}
