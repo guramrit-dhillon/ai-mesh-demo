@@ -305,27 +305,28 @@ function positionsRef_get(
 }
 
 function tokenColor(node: GraphNode): string {
+  // Animus / holo-map cyan palette
   if (node.kind === 'chain') {
     const t = 0.7 + 0.3 * node.decay;
-    return `rgb(${Math.round(165 * t)}, ${Math.round(205 * t)}, ${Math.round(255 * t)})`;
+    return `rgb(${Math.round(140 * t)}, ${Math.round(230 * t)}, ${Math.round(255 * t)})`;
   }
   if (node.kind === 'lookahead') {
     if (node.isTop) {
-      // Lookahead top-1: warmer tint to distinguish from active top-1 (white)
       const t = node.decay;
-      return `rgb(${Math.round(220 * t + 35)}, ${Math.round(200 * t + 30)}, ${Math.round(255 * t + 0)})`;
+      // Lookahead top-1: aqua-mint, distinct from active top-1 (white-cyan)
+      return `rgb(${Math.round(150 * t + 70)}, ${Math.round(255 * t)}, ${Math.round(220 * t + 35)})`;
     }
     const t = node.decay * (0.5 + 0.5 * node.prob);
-    return `rgb(${Math.round(160 * t + 40)}, ${Math.round(180 * t + 40)}, ${Math.round(220 * t + 40)})`;
+    return `rgb(${Math.round(120 * t + 50)}, ${Math.round(200 * t + 50)}, ${Math.round(220 * t + 35)})`;
   }
-  if (node.isTop && node.isActive) return '#ffffff';
+  if (node.isTop && node.isActive) return '#e8fbff';
   if (node.isActive) {
-    if (!node.alive) return '#475569';
-    const t = 0.7 + 0.3 * node.prob;
-    return `rgb(${Math.round(180 * t)}, ${Math.round(215 * t)}, ${Math.round(255 * t)})`;
+    if (!node.alive) return '#3a5066';
+    const t = 0.65 + 0.35 * node.prob;
+    return `rgb(${Math.round(120 * t)}, ${Math.round(225 * t)}, ${Math.round(255 * t)})`;
   }
-  if (node.isChosen) return '#a5c8ff';
-  return '#3f546e';
+  if (node.isChosen) return '#7ce4ff';
+  return '#33536b';
 }
 
 function tokenSize(node: GraphNode): number {
@@ -341,18 +342,19 @@ function tokenSize(node: GraphNode): number {
 }
 
 function linkColor(link: GraphLink): string {
+  // Cyan/teal links for the holo-map look
   const i = Math.min(1, link.intensity);
   if (link.isChain) {
-    return `rgba(150, 200, 255, ${0.4 + 0.6 * i})`;
+    return `rgba(120, 235, 255, ${0.4 + 0.6 * i})`;
   }
   if (link.isTopFan) {
-    return `rgba(180, 220, 255, ${0.5 + 0.5 * i})`;
+    return `rgba(180, 250, 255, ${0.55 + 0.45 * i})`;
   }
   if (link.isLookahead) {
-    const a = 0.12 + 0.45 * i;
-    return `rgba(170, 200, 255, ${a})`;
+    const a = 0.12 + 0.5 * i;
+    return `rgba(140, 230, 220, ${a})`;
   }
-  return `rgba(120, 175, 255, ${0.18 * i + 0.05})`;
+  return `rgba(100, 200, 230, ${0.18 * i + 0.05})`;
 }
 
 function makeSprite(node: GraphNode): THREE.Object3D {
@@ -474,10 +476,10 @@ export function MeshCanvas() {
     const existing = scene.children.find((c) => c.name === STAR_TAG);
     if (!existing) {
       const starGeom = new THREE.BufferGeometry();
-      const starCount = 4000;
+      const starCount = 6000;
       const positions = new Float32Array(starCount * 3);
       for (let i = 0; i < starCount; i++) {
-        const r = 600 + Math.random() * 1200;
+        const r = 400 + Math.random() * 1600;
         const theta = Math.random() * Math.PI * 2;
         const phi = Math.acos(2 * Math.random() - 1);
         positions[i * 3] = r * Math.sin(phi) * Math.cos(theta);
@@ -486,25 +488,43 @@ export function MeshCanvas() {
       }
       starGeom.setAttribute('position', new THREE.BufferAttribute(positions, 3));
       const starMat = new THREE.PointsMaterial({
-        color: 0xb6c8ff,
-        size: 1.2,
+        color: 0x7ce4ff,
+        size: 1.4,
         sizeAttenuation: true,
         transparent: true,
-        opacity: 0.7
+        opacity: 0.6
       });
       const stars = new THREE.Points(starGeom, starMat);
       stars.name = STAR_TAG;
       scene.add(stars);
     }
-    // Bloom for the sci-fi glow on bright text/edges.
+
+    // Holographic grid floor — tints the lower hemisphere with the classic
+    // sci-fi blueprint look. Lives below the action so it doesn't compete
+    // with the chain.
+    const GRID_TAG = 'llm-viz-grid';
+    if (!scene.children.find((c) => c.name === GRID_TAG)) {
+      const grid = new THREE.GridHelper(800, 80, 0x4dd9ff, 0x1a4a66) as THREE.Object3D;
+      // dispose-friendly material tweaks
+      const gridLines = grid as unknown as { material?: { transparent: boolean; opacity: number } };
+      if (gridLines.material) {
+        gridLines.material.transparent = true;
+        gridLines.material.opacity = 0.18;
+      }
+      grid.position.y = -120;
+      grid.name = GRID_TAG;
+      scene.add(grid);
+    }
+
+    // Stronger bloom — the holo look needs noticeable blooming on the bright text.
     if (fg.postProcessingComposer) {
       try {
         const composer = fg.postProcessingComposer();
         const bloomPass = new UnrealBloomPass(
           new THREE.Vector2(window.innerWidth, window.innerHeight),
-          0.95, // strength
-          0.7, // radius
-          0.18 // threshold (lower = more things bloom)
+          1.5, // strength
+          0.95, // radius
+          0.08 // threshold (low = lots of stuff blooms — that holo feel)
         );
         composer.addPass(bloomPass);
       } catch {
@@ -612,7 +632,7 @@ export function MeshCanvas() {
       className="relative h-full w-full"
       style={{
         background:
-          'radial-gradient(ellipse at 50% 50%, #0f1a3d 0%, #060b22 50%, #02030a 100%)'
+          'radial-gradient(ellipse at 50% 55%, #0a2a3e 0%, #061829 38%, #030914 70%, #01040a 100%)'
       }}
     >
       <ForceGraph3D
@@ -651,7 +671,12 @@ export function MeshCanvas() {
         }}
         onNodeHover={(node) => {
           const n = node as unknown as GraphNode | null;
-          if (!n || n.kind !== 'candidate' || !n.treeNodeId || n.candidateIndex === undefined) {
+          if (
+            !n ||
+            (n.kind !== 'candidate' && n.kind !== 'lookahead') ||
+            !n.treeNodeId ||
+            n.candidateIndex === undefined
+          ) {
             setHover(null, null);
             document.body.style.cursor = '';
             return;
@@ -661,18 +686,97 @@ export function MeshCanvas() {
         }}
         onNodeClick={(node) => {
           const n = node as unknown as GraphNode;
-          if (n.kind !== 'candidate' || !n.treeNodeId || !n.candidate) return;
-          // Allow clicking historical alternatives — store.expand prunes any
-          // existing future, branching the chain at the clicked position.
+          if (
+            (n.kind !== 'candidate' && n.kind !== 'lookahead') ||
+            !n.treeNodeId ||
+            !n.candidate
+          ) return;
+          // Click any candidate — active, historical, OR lookahead — to advance
+          // the chain to that point. Clicking a deep lookahead candidate
+          // collapses the predicted path into the chain in one move.
           expand(n.treeNodeId, n.candidate);
         }}
       />
+
+      {/* Holo scan-line overlay */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          backgroundImage:
+            'repeating-linear-gradient(0deg, rgba(125, 235, 255, 0.04) 0px, rgba(125, 235, 255, 0.04) 1px, transparent 2px, transparent 4px)',
+          mixBlendMode: 'screen'
+        }}
+      />
+      {/* Vignette for that holo-display feel */}
+      <div
+        className="pointer-events-none absolute inset-0"
+        style={{
+          background:
+            'radial-gradient(ellipse at 50% 55%, transparent 40%, rgba(0,0,0,0.45) 100%)'
+        }}
+      />
+
       {isThinking && (
-        <div className="pointer-events-none absolute right-4 top-4 flex items-center gap-2 rounded-full border border-blue-400/30 bg-blue-500/10 px-3 py-1 backdrop-blur-sm">
-          <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-blue-300" />
-          <span className="text-[10px] uppercase tracking-wider text-blue-200/80">thinking</span>
+        <div className="pointer-events-none absolute right-4 top-4 flex items-center gap-2 rounded-full border border-cyan-400/30 bg-cyan-500/10 px-3 py-1 backdrop-blur-sm">
+          <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-cyan-300" />
+          <span className="text-[10px] uppercase tracking-wider text-cyan-200/80">thinking</span>
         </div>
       )}
+
+      {/* Top-left controls: recenter + fullscreen */}
+      <div className="absolute left-4 top-4 flex items-center gap-2">
+        <button
+          onClick={() => {
+            const fg = fgRef.current as
+              | {
+                  controls: () => { target?: { set: (x: number, y: number, z: number) => void } };
+                  zoomToFit: (ms?: number, padding?: number, filter?: unknown) => void;
+                }
+              | null;
+            if (!fg) return;
+            try {
+              const ctl = fg.controls();
+              if (ctl?.target) ctl.target.set(0, 0, 0);
+            } catch { /* */ }
+            try {
+              const fitter = fg.zoomToFit as unknown as (
+                ms?: number,
+                padding?: number,
+                filter?: (n: { isTip?: boolean; isActive?: boolean; kind?: string }) => boolean
+              ) => void;
+              fitter(700, 100, (n) => !!n.isTip || (n.kind === 'candidate' && !!n.isActive));
+            } catch { /* */ }
+          }}
+          className="rounded-full border border-cyan-400/30 bg-cyan-500/10 px-3 py-1 text-[10px] uppercase tracking-wider text-cyan-200/80 backdrop-blur-sm hover:bg-cyan-500/20"
+        >
+          recenter
+        </button>
+        <button
+          onClick={() => {
+            const el = containerRef.current;
+            if (!el) return;
+            if (document.fullscreenElement) {
+              document.exitFullscreen?.();
+            } else {
+              el.requestFullscreen?.();
+            }
+          }}
+          className="rounded-full border border-cyan-400/30 bg-cyan-500/10 px-3 py-1 text-[10px] uppercase tracking-wider text-cyan-200/80 backdrop-blur-sm hover:bg-cyan-500/20"
+        >
+          fullscreen
+        </button>
+      </div>
+
+      {/* Pan / orbit hint, fades after a few seconds */}
+      <div
+        className="pointer-events-none absolute bottom-4 left-4 text-[10px] uppercase tracking-wider text-cyan-200/40"
+        style={{ animation: 'fadeOut 8s ease-in 4s forwards' }}
+      >
+        drag = orbit · right-click = pan · scroll = zoom
+      </div>
+      <style>{`
+        @keyframes fadeOut { to { opacity: 0; } }
+      `}</style>
     </div>
   );
 }
