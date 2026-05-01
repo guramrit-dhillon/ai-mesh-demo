@@ -569,20 +569,37 @@ export function MeshCanvas() {
 
   }, [graphData]);
 
-  // The tip is pinned at world origin (0, 0, 0). When the chain advances or
-  // the user clicks, gently re-anchor the camera's lookAt to the tip so the
-  // active region stays centered. Camera distance / rotation are preserved.
-  const tipSignature = `${tipNodeId}:${tipNode?.inputTokens?.length ?? 0}`;
+  // Compute the rotation pivot — midpoint between the leftmost visible chain
+  // bubble and a small offset to the right of the tip (where the active fan +
+  // lookahead live). Rotation around this point keeps the visible content
+  // pivoting in place rather than swinging around an off-center anchor.
+  const chainLen = tipNode?.inputTokens?.length ?? 0;
+  const visibleChain = Math.min(chainLen, MAX_VISIBLE_CHAIN);
+  // Chain spans x = (1 - visibleChain) * CHAIN_SPACING ... 0; fan extends to the right of 0
+  // We bias slightly right of geometric center so the camera looks at the active region.
+  const pivotX = visibleChain > 0
+    ? ((1 - visibleChain) * CHAIN_SPACING) / 2 + 6
+    : 0;
+
+  const tipSignature = `${tipNodeId}:${chainLen}`;
   useEffect(() => {
     const fg = fgRef.current as
-      | { controls: () => { target?: { set: (x: number, y: number, z: number) => void } } }
+      | {
+          controls: () => {
+            target?: { set: (x: number, y: number, z: number) => void };
+            update?: () => void;
+          };
+        }
       | null;
     if (!fg) return;
     try {
       const ctl = fg.controls();
-      if (ctl?.target) ctl.target.set(0, 0, 0);
+      if (ctl?.target) {
+        ctl.target.set(pivotX, 0, 0);
+        if (typeof ctl.update === 'function') ctl.update();
+      }
     } catch { /* unmounted or no controls yet */ }
-  }, [tipSignature]);
+  }, [tipSignature, pivotX]);
 
   // Auto-fit ONCE when the graph first becomes populated. After that, the
   // camera stays put across keystrokes / clicks / slider drags so the view
@@ -729,14 +746,20 @@ export function MeshCanvas() {
           onClick={() => {
             const fg = fgRef.current as
               | {
-                  controls: () => { target?: { set: (x: number, y: number, z: number) => void } };
+                  controls: () => {
+                    target?: { set: (x: number, y: number, z: number) => void };
+                    update?: () => void;
+                  };
                   zoomToFit: (ms?: number, padding?: number, filter?: unknown) => void;
                 }
               | null;
             if (!fg) return;
             try {
               const ctl = fg.controls();
-              if (ctl?.target) ctl.target.set(0, 0, 0);
+              if (ctl?.target) {
+                ctl.target.set(pivotX, 0, 0);
+                if (typeof ctl.update === 'function') ctl.update();
+              }
             } catch { /* */ }
             try {
               const fitter = fg.zoomToFit as unknown as (
