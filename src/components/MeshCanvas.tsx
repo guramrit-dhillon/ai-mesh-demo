@@ -369,15 +369,19 @@ function makeSprite(node: GraphNode): THREE.Object3D {
   sprite.material.transparent = true;
   sprite.padding = 1;
 
+  // Always wrap in a group so we have a scale handle that does NOT conflict
+  // with three-spritetext's internal scale management (it sets the sprite's
+  // scale based on its rendered text bitmap).
+  const wrapper = new THREE.Group();
+
   if (node.isTop && node.isActive) {
-    // Add a subtle glowing halo behind the text using a sprite with radial gradient
     const haloCanvas = document.createElement('canvas');
     haloCanvas.width = 256;
     haloCanvas.height = 256;
     const ctx = haloCanvas.getContext('2d')!;
     const grad = ctx.createRadialGradient(128, 128, 0, 128, 128, 128);
-    grad.addColorStop(0, 'rgba(165,200,255,0.55)');
-    grad.addColorStop(0.5, 'rgba(120,175,255,0.18)');
+    grad.addColorStop(0, 'rgba(165,220,255,0.55)');
+    grad.addColorStop(0.5, 'rgba(120,200,235,0.18)');
     grad.addColorStop(1, 'rgba(0,0,0,0)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, 256, 256);
@@ -390,13 +394,17 @@ function makeSprite(node: GraphNode): THREE.Object3D {
     });
     const halo = new THREE.Sprite(haloMat);
     halo.scale.set(40, 40, 1);
-    const group = new THREE.Group();
-    group.add(halo);
-    group.add(sprite);
-    return group;
+    wrapper.add(halo);
   }
 
-  return sprite;
+  wrapper.add(sprite);
+
+  // Tag the wrapper for fade-in. The animation loop (in MeshCanvas) eases
+  // wrapper.scale 0→1 over 500ms, composing on top of the sprite's own scale.
+  wrapper.scale.setScalar(0.001);
+  wrapper.userData.__fadeStart = performance.now();
+
+  return wrapper;
 }
 
 function FallbackOverlay({ message, isError }: { message: string; isError?: boolean }) {
@@ -459,14 +467,38 @@ export function MeshCanvas() {
 
   useEffect(() => {
     graphDataRef.current = graphData;
-    // Nudge force-graph to ingest the new node set immediately. Without this
-    // the library can sit on partial data when nodes arrive in waves
-    // (incremental top-K, or a lookahead inference returning later).
     const fg = fgRef.current as { refresh?: () => void } | null;
     if (fg && typeof fg.refresh === 'function') {
       try { fg.refresh(); } catch { /* */ }
     }
   }, [graphData]);
+
+  // Fade-in animation loop — eases wrapper groups' scale from 0 to 1 over
+  // 500 ms with cubic ease-out. Each new node is tagged in makeSprite.
+  useEffect(() => {
+    let raf = 0;
+    const FADE_MS = 500;
+    const animate = () => {
+      raf = requestAnimationFrame(animate);
+      const fg = fgRef.current as { scene?: () => THREE.Scene } | null;
+      if (!fg?.scene) return;
+      let scene: THREE.Scene;
+      try { scene = fg.scene(); } catch { return; }
+      const now = performance.now();
+      scene.traverse((obj) => {
+        const ud = obj.userData as { __fadeStart?: number };
+        if (ud.__fadeStart === undefined) return;
+        const age = now - ud.__fadeStart;
+        if (age < 0) return;
+        const t = Math.min(age / FADE_MS, 1);
+        const eased = 1 - Math.pow(1 - t, 3);
+        obj.scale.setScalar(eased);
+        if (t >= 1) delete ud.__fadeStart;
+      });
+    };
+    raf = requestAnimationFrame(animate);
+    return () => cancelAnimationFrame(raf);
+  }, []);
 
   useEffect(() => {
     const fg = fgRef.current as
